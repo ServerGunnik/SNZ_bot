@@ -12,6 +12,7 @@ const {
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   UserSelectMenuBuilder,
+  FileBuilder,
   MessageFlags,
 } = require('discord.js');
 
@@ -130,7 +131,7 @@ function kartaTicketu({ ticketId = null, uzytkownik, kategoria, przydzielony = n
   } else {
     c.addTextDisplayComponents(tekst('Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.'));
   }
-  c.addTextDisplayComponents(tekst('-# Zamknięcie zgłoszenia wymaga wpisania wyjaśnienia, jak sprawa została rozwiązana.'));
+  c.addTextDisplayComponents(tekst('-# Zgłoszenie zamyka administracja po wpisaniu wyjaśnienia, jak sprawa została rozwiązana.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
     przycisk('ticket:przejmij', 'Przejmij', ButtonStyle.Primary),
@@ -202,12 +203,12 @@ function kartaOcenyTicketu(ticketId, wyjasnienie = null) {
 
 // ---- Państwa -----------------------------------------------------------
 
-function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Set() }) {
+function kartaPanstwa({ panstwo, krol = null, czlonkowie, strona, stron, listyGoncze = new Set(), statusy }) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst(`## Państwo — ${panstwo.nazwa}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
-    `**Lider:** ${panstwo.lider_id ? `<@${panstwo.lider_id}>` : 'wakat'}\n` +
+    `**${statusy.krol}:** ${panstwo.lider_id ? `<@${panstwo.lider_id}>` : 'wakat'}${krol ? ` (\`${krol}\`)` : ' — _brak weryfikacji, nick nie trafi do configu_'}\n` +
     `**Członkowie:** ${czlonkowie.total} / ${panstwo.limit_czlonkow}`
   ));
   c.addSeparatorComponents(separator(true));
@@ -215,17 +216,19 @@ function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Se
   const lista = czlonkowie.strona.length
     ? czlonkowie.strona.map((cz, i) => {
         const num = (strona - 1) * czlonkowie.naStrone + i + 1;
+        const status = cz.status === 'zastepca' ? ` — *${statusy.zastepca}*` : '';
         const marker = listyGoncze.has(cz.nick.toLowerCase()) ? ' `[LIST GOŃCZY]`' : '';
-        return `\`${String(num).padStart(2, '0')}\` **${cz.nick}**${marker}`;
+        return `\`${String(num).padStart(2, '0')}\` **${cz.nick}**${status}${marker}`;
       }).join('\n')
     : '_Brak członków. Dodaj pierwszego przyciskiem poniżej._';
 
   c.addTextDisplayComponents(tekst(lista));
-  c.addTextDisplayComponents(tekst(`-# Strona ${strona} z ${stron}`));
+  c.addTextDisplayComponents(tekst(`-# Strona ${strona} z ${stron} • Tylko ${statusy.krol.toLowerCase()} może dodawać, usuwać i zmieniać statusy.`));
   c.addSeparatorComponents(separator(false));
 
   const rowAkcje = new ActionRowBuilder().addComponents(
     przycisk(`panstwo:dodaj:${panstwo.id}`, 'Dodaj nick', ButtonStyle.Success),
+    przycisk(`panstwo:status:${panstwo.id}:${strona}`, 'Zmień status', ButtonStyle.Primary, null, czlonkowie.total === 0),
     przycisk(`panstwo:usun:${panstwo.id}:${strona}`, 'Usuń nick', ButtonStyle.Danger, null, czlonkowie.total === 0),
   );
   c.addActionRowComponents(rowAkcje);
@@ -237,6 +240,92 @@ function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Se
     );
     c.addActionRowComponents(rowNav);
   }
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// ---- Lista sojuszu (/sojusz-lista) -------------------------------------
+
+function przyciskConfigu() {
+  return przycisk('sojuszlista:config', 'Config dla moda', ButtonStyle.Success, '📄');
+}
+
+function kartaListySojuszu({ wpisy, strona, stron, liczbaPanstw, liczbaGraczy, statusy }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## Sojusz Narodów Zjednoczonych — państwa'));
+  c.addTextDisplayComponents(tekst(`-# Państw: ${liczbaPanstw} • Graczy: ${liczbaGraczy}`));
+  c.addSeparatorComponents(separator(true));
+
+  if (!wpisy.length) {
+    c.addTextDisplayComponents(tekst('_Brak zarejestrowanych państw._'));
+  } else {
+    c.addTextDisplayComponents(tekst(wpisy.map(({ panstwo, sklad }) => {
+      const krol = sklad.find(o => o.status === 'krol');
+      const zastepcy = sklad.filter(o => o.status === 'zastepca').map(o => `\`${o.nick}\``);
+      const czlonkow = sklad.filter(o => o.status === 'czlonek').length;
+      return `### ${panstwo.nazwa}${panstwo.sojusznik ? '' : ' — `POZA SOJUSZEM`'}\n` +
+        `**${statusy.krol}:** ${krol ? `\`${krol.nick}\`` : '_brak_'}${panstwo.lider_id ? ` (<@${panstwo.lider_id}>)` : ''}\n` +
+        `**${statusy.zastepca}:** ${zastepcy.length ? zastepcy.slice(0, 5).join(', ') + (zastepcy.length > 5 ? ` +${zastepcy.length - 5}` : '') : '_brak_'}\n` +
+        `**Członków:** ${czlonkow} • **Razem:** ${sklad.length}`;
+    }).join('\n')));
+    c.addTextDisplayComponents(tekst(`-# Strona ${strona} z ${stron} • Wybierz państwo z listy, aby zobaczyć wszystkich graczy.`));
+  }
+  c.addSeparatorComponents(separator(false));
+
+  if (wpisy.length) {
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('sojuszlista:panstwo')
+        .setPlaceholder('Pokaż skład państwa')
+        .addOptions(wpisy.map(({ panstwo, sklad }) => new StringSelectMenuOptionBuilder()
+          .setLabel(panstwo.nazwa.slice(0, 100))
+          .setValue(String(panstwo.id))
+          .setDescription(`${sklad.length} graczy`)))
+    ));
+  }
+  const przyciski = [];
+  if (stron > 1) {
+    przyciski.push(
+      przycisk(`sojuszlista:str:${strona - 1}`, '‹ Poprzednia', ButtonStyle.Secondary, null, strona === 1),
+      przycisk(`sojuszlista:str:${strona + 1}`, 'Następna ›', ButtonStyle.Secondary, null, strona === stron),
+    );
+  }
+  przyciski.push(przyciskConfigu());
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(...przyciski));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaSkladuPanstwa({ panstwo, sklad, strona, stron, naStrone, total, statusy }) {
+  const c = kontener(panstwo.sojusznik ? kolory.info : kolory.neutralny);
+  c.addTextDisplayComponents(tekst(`## ${panstwo.nazwa}`));
+  c.addTextDisplayComponents(tekst(`-# ${panstwo.sojusznik ? 'Państwo w sojuszu' : 'Państwo poza sojuszem'} • Graczy: ${total}`));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(sklad.length
+    ? sklad.map((o, i) => `\`${String((strona - 1) * naStrone + i + 1).padStart(2, '0')}\` **${o.nick}** — ${statusy[o.status]}`).join('\n')
+    : '_Brak graczy w tym państwie._'));
+  c.addTextDisplayComponents(tekst(`-# Strona ${strona} z ${stron}`));
+  c.addSeparatorComponents(separator(false));
+  const przyciski = [przycisk('sojuszlista:str:1', '‹ Wróć do listy', ButtonStyle.Secondary)];
+  if (stron > 1) {
+    przyciski.push(
+      przycisk(`sojuszlista:czl:${panstwo.id}:${strona - 1}`, '‹', ButtonStyle.Secondary, null, strona === 1),
+      przycisk(`sojuszlista:czl:${panstwo.id}:${strona + 1}`, '›', ButtonStyle.Secondary, null, strona === stron),
+    );
+  }
+  przyciski.push(przyciskConfigu());
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(...przyciski));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaConfigu({ nazwaPliku, liczbaWpisow, podglad = null }) {
+  const c = kontener(kolory.sukces);
+  c.addTextDisplayComponents(tekst('## Config sojuszu dla moda'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `Aktualna lista graczy wszystkich państw (**${liczbaWpisow}** wpisów).\n` +
+    `Pobierz plik \`${nazwaPliku}\` i wrzuć go do folderu configu moda.`
+  ));
+  if (podglad) c.addTextDisplayComponents(tekst(`\`\`\`json\n${podglad}\n\`\`\``));
+  c.addFileComponents(new FileBuilder().setURL(`attachment://${nazwaPliku}`));
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -453,7 +542,7 @@ module.exports = {
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
   panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
-  kartaPanstwa,
+  kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
   kartaListuGonczego, kartaZgloszeniaListu,
   kartaSprawy, kartaWyroku,
   kartaModCall,
