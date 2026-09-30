@@ -6,9 +6,15 @@ const { opublikujList, zamknijList } = require('../modules/listy-goncze.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 
+async function powiadomWystawce(client, list, payload) {
+  const user = await client.users.fetch(list.wystawca_id).catch(() => null);
+  if (user) await user.send(payload).catch(() => null);
+}
+
 const q = {
   poId: db.prepare('SELECT * FROM listy_goncze WHERE id = ?'),
-  zatwierdz: db.prepare("UPDATE listy_goncze SET status = 'aktywny' WHERE id = ?"),
+  // Ważność liczona od zatwierdzenia, a nie od złożenia
+  zatwierdz: db.prepare("UPDATE listy_goncze SET status = 'aktywny', wygasa = ? WHERE id = ?"),
   odrzuc: db.prepare("UPDATE listy_goncze SET status = 'odrzucony', zamkniety = ?, zamkniety_przez = ? WHERE id = ?"),
 };
 
@@ -51,8 +57,11 @@ module.exports = {
         ...karty.kartaOstrzezenie('Zły status', `List jest w statusie **${list.status}**.`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
-      q.zatwierdz.run(id);
+      const waznoscMs = list.wygasa ? list.wygasa - list.utworzony : null;
+      q.zatwierdz.run(waznoscMs ? Date.now() + waznoscMs : null, id);
       await opublikujList(interaction.client, id);
+      await powiadomWystawce(interaction.client, list,
+        karty.kartaSukces('List gończy zatwierdzony', `Twój list **#${id}** na \`${list.nick}\` został opublikowany.`));
       await log(interaction.client, {
         tytul: 'List gończy zatwierdzony',
         opis: `**#${id}** \`${list.nick}\` — zatwierdził <@${interaction.user.id}>`,
@@ -71,6 +80,8 @@ module.exports = {
       });
       const powod = interaction.options.getString('powod');
       q.odrzuc.run(Date.now(), interaction.user.id, id);
+      await powiadomWystawce(interaction.client, list,
+        karty.kartaBlad('List gończy odrzucony', `Twój list **#${id}** na \`${list.nick}\` został odrzucony.\n**Powód:** ${powod}`));
       await log(interaction.client, {
         tytul: 'List gończy odrzucony',
         opis: `**#${id}** \`${list.nick}\`\n**Powód:** ${powod}\n**Odrzucił:** <@${interaction.user.id}>`,
@@ -83,6 +94,10 @@ module.exports = {
     }
 
     if (sub === 'zamknij') {
+      if (list.status !== 'aktywny') return interaction.reply({
+        ...karty.kartaOstrzezenie('Zły status', `List jest w statusie **${list.status}**.`),
+        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+      });
       const status = interaction.options.getString('status');
       await zamknijList(interaction.client, id, status, interaction.user.id);
       return interaction.reply({

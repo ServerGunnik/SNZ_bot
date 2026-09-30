@@ -1,7 +1,12 @@
-// Placeholder - można dodać powitanie w przyszłości
+const antynuke = require('../modules/antynuke.js');
+
 module.exports = {
   name: 'guildMemberAdd',
   async execute(member) {
-    // np. wysłanie DM z linkiem do kanału weryfikacji - opcjonalne
+    try {
+      await antynuke.obsluzDolaczenie(member);
+    } catch (e) {
+      console.error('[guildMemberAdd]', e);
+    }
   },
 };

@@ -94,6 +94,12 @@ module.exports = {
           flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
         });
       }
+      if (q.role.all(grupa).length >= 25) {
+        return interaction.reply({
+          ...karty.kartaBlad('Limit ról', 'Grupa może mieć maksymalnie 25 ról (limit Discorda dla listy wyboru).'),
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+        });
+      }
       const rola = interaction.options.getRole('rola');
       const etykieta = interaction.options.getString('etykieta');
       const opis = interaction.options.getString('opis') || null;

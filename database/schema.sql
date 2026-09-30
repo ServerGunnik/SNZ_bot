@@ -16,9 +16,25 @@ CREATE TABLE IF NOT EXISTS tickety (
   status TEXT NOT NULL DEFAULT 'otwarty', -- otwarty, zamkniety
   otwarty INTEGER NOT NULL,
   zamkniety INTEGER,
+  zamknal TEXT,
+  wyjasnienie TEXT,
+  temat TEXT,
+  opis TEXT,
+  wiadomosc_id TEXT,
   ocena INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tickety_user ON tickety(user_id, status);
+
+-- Notatki staffu w ticketach (niewidoczne dla gracza)
+CREATE TABLE IF NOT EXISTS tickety_notatki (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  autor_id TEXT NOT NULL,
+  tresc TEXT NOT NULL,
+  data INTEGER NOT NULL,
+  FOREIGN KEY(ticket_id) REFERENCES tickety(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tickety_notatki ON tickety_notatki(ticket_id);
 
 -- SELFROLE
 CREATE TABLE IF NOT EXISTS selfrole_grupy (
@@ -149,3 +165,10 @@ CREATE TABLE IF NOT EXISTS mod_call (
   liczba_pingow INTEGER DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_modcall_user ON mod_call(user_id, status);
+
+-- ANTYNUKE
+CREATE TABLE IF NOT EXISTS antynuke_whitelist (
+  user_id TEXT PRIMARY KEY,
+  dodal TEXT NOT NULL,
+  data INTEGER NOT NULL
+);

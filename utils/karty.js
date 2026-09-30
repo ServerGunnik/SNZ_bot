@@ -115,29 +115,82 @@ function panelTicketow(kategorie) {
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaTicketu({ uzytkownik, kategoria, przydzielony = null }) {
+function kartaTicketu({ ticketId = null, uzytkownik, kategoria, przydzielony = null, temat = null, opis = null }) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst(`## Zgłoszenie — ${kategoria}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Zgłaszający:** <@${uzytkownik}>\n` +
     `**Kategoria:** ${kategoria}\n` +
-    `**Obsługuje:** ${przydzielony ? `<@${przydzielony}>` : 'nikt jeszcze'}\n\n` +
-    'Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.'
+    `**Obsługuje:** ${przydzielony ? `<@${przydzielony}>` : 'nikt jeszcze'}`
   ));
+  c.addSeparatorComponents(separator(true));
+  if (temat || opis) {
+    c.addTextDisplayComponents(tekst(`### ${temat || 'Opis sprawy'}\n${opis || ''}`));
+  } else {
+    c.addTextDisplayComponents(tekst('Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.'));
+  }
+  c.addTextDisplayComponents(tekst('-# Zamknięcie zgłoszenia wymaga wpisania wyjaśnienia, jak sprawa została rozwiązana.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
     przycisk('ticket:przejmij', 'Przejmij', ButtonStyle.Primary),
     przycisk('ticket:zamknij', 'Zamknij zgłoszenie', ButtonStyle.Danger)
   ));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')
+  ));
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaOcenyTicketu(ticketId) {
+// Lista notatek przycięta do limitu znaków (najnowsze mają pierwszeństwo)
+function listaNotatek(notatki, limitZnakow = 3000) {
+  const linie = [];
+  let dlugosc = 0;
+  for (let i = notatki.length - 1; i >= 0; i--) {
+    const n = notatki[i];
+    const linia = `<@${n.autor_id}> <t:${Math.floor(n.data / 1000)}:t> — ${n.tresc}`;
+    if (dlugosc + linia.length + 1 > limitZnakow) {
+      linie.unshift(`-# …oraz ${i + 1} starszych (pełna lista w transkrypcie po zamknięciu)`);
+      break;
+    }
+    linie.unshift(linia);
+    dlugosc += linia.length + 1;
+  }
+  return linie.join('\n');
+}
+
+function kartaNotatekTicketu({ ticketId, notatki }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## 🔒 Panel staffu — notatki'));
+  c.addTextDisplayComponents(tekst('-# Widoczne tylko dla administracji. Gracz nie widzi tych notatek.'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(notatki.length ? listaNotatek(notatki) : '_Brak notatek. Dodaj pierwszą przyciskiem poniżej._'));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(`ticket:notatka-dodaj:${ticketId}`, 'Dodaj notatkę', ButtonStyle.Success),
+    przycisk(`ticket:notatki:${ticketId}`, 'Odśwież', ButtonStyle.Secondary)
+  ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaWyjasnieniaTicketu({ zamykajacy, wyjasnienie }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## Wyjaśnienie zgłoszenia'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(`${wyjasnienie}\n\n**Zamyka:** <@${zamykajacy}>`));
+  c.addTextDisplayComponents(tekst('-# Kanał zostanie usunięty za 5 sekund.'));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaOcenyTicketu(ticketId, wyjasnienie = null) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst('## Oceń obsługę zgłoszenia'));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst('Twoje zgłoszenie zostało zamknięte. Wystaw ocenę od 1 do 5 — pomoże nam to podnosić jakość obsługi.'));
+  if (wyjasnienie) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`**Wyjaśnienie:**\n${wyjasnienie}`));
+  }
   c.addSeparatorComponents(separator(false));
   const row = new ActionRowBuilder();
   for (let i = 1; i <= 5; i++) {
@@ -161,7 +214,7 @@ function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Se
 
   const lista = czlonkowie.strona.length
     ? czlonkowie.strona.map((cz, i) => {
-        const num = (strona - 1) * czlonkowie.strona.length + i + 1;
+        const num = (strona - 1) * czlonkowie.naStrone + i + 1;
         const marker = listyGoncze.has(cz.nick.toLowerCase()) ? ' `[LIST GOŃCZY]`' : '';
         return `\`${String(num).padStart(2, '0')}\` **${cz.nick}**${marker}`;
       }).join('\n')
@@ -173,7 +226,7 @@ function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Se
 
   const rowAkcje = new ActionRowBuilder().addComponents(
     przycisk(`panstwo:dodaj:${panstwo.id}`, 'Dodaj nick', ButtonStyle.Success),
-    przycisk(`panstwo:usun:${panstwo.id}`, 'Usuń nick', ButtonStyle.Danger, null, czlonkowie.total === 0),
+    przycisk(`panstwo:usun:${panstwo.id}:${strona}`, 'Usuń nick', ButtonStyle.Danger, null, czlonkowie.total === 0),
   );
   c.addActionRowComponents(rowAkcje);
 
@@ -294,10 +347,12 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   c.addSeparatorComponents(separator(false));
 
   const przyciski = [];
-  if (sprawa.status === 'zlozona') {
-    przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`, 'Przyjmij sprawę', ButtonStyle.Success));
+  const czekaNaSedziego = sprawa.status === 'zlozona' || (sprawa.status === 'odwolanie' && !sprawa.sedzia_id);
+  if (czekaNaSedziego) {
+    przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`,
+      sprawa.status === 'odwolanie' ? 'Przyjmij odwołanie' : 'Przyjmij sprawę', ButtonStyle.Success));
   }
-  if (['przyjeta', 'w_toku', 'odwolanie'].includes(sprawa.status)) {
+  if (['przyjeta', 'w_toku', 'odwolanie'].includes(sprawa.status) && sprawa.sedzia_id) {
     przyciski.push(
       przycisk(`sad:dowod:${sprawa.id}`, 'Dodaj dowód', ButtonStyle.Secondary),
       przycisk(`sad:wyrok:${sprawa.id}`, 'Wydaj wyrok', ButtonStyle.Primary),
@@ -397,7 +452,7 @@ module.exports = {
   FLAGS_V2,
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
-  panelWeryfikacji, panelTicketow, kartaTicketu, kartaOcenyTicketu,
+  panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
   kartaPanstwa,
   kartaListuGonczego, kartaZgloszeniaListu,
   kartaSprawy, kartaWyroku,

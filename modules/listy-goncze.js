@@ -108,7 +108,7 @@ async function onZglosDecyzja(interaction) {
   const noweStatus = decyzja === 'ok' ? 'zatwierdzone' : 'odrzucone';
   q.aktualizujZgloszenie.run(noweStatus, Date.now(), interaction.user.id, zgloszenie.id);
 
-  if (decyzja === 'ok') {
+  if (decyzja === 'ok' && q.poId.get(zgloszenie.list_id)?.status === 'aktywny') {
     await zamknijList(interaction.client, zgloszenie.list_id, 'zrealizowany', interaction.user.id);
   }
 
@@ -122,7 +122,12 @@ async function onZamknij(interaction) {
   const [, , idStr] = interaction.customId.split(':');
   const id = parseInt(idStr, 10);
   const list = q.poId.get(id);
-  if (!list) return;
+  if (!list || list.status !== 'aktywny') {
+    return interaction.reply({
+      ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
   if (!jestStaff(interaction.member) && list.wystawca_id !== interaction.user.id) {
     return interaction.reply({
       ...karty.kartaBlad('Brak uprawnień', 'Zamknąć może wystawca lub staff.'),

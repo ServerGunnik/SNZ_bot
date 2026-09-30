@@ -16,7 +16,14 @@ const q = {
   zapiszKanal: db.prepare('UPDATE sprawy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   ostatnia: db.prepare("SELECT numer FROM sprawy ORDER BY id DESC LIMIT 1"),
   panstwaPoNazwie: db.prepare('SELECT * FROM panstwa WHERE nazwa = ? COLLATE NOCASE'),
+  weryfikacjaPoNicku: db.prepare('SELECT * FROM weryfikacja WHERE nick = ? COLLATE NOCASE'),
 };
+
+// Discord ID strony pozwanej: zweryfikowany właściciel nicku albo lider pozwanego państwa
+function idPozwanego(typ, pozwany) {
+  if (typ === 'nick') return q.weryfikacjaPoNicku.get(pozwany)?.user_id || null;
+  return q.panstwaPoNazwie.get(pozwany)?.lider_id || null;
+}
 
 function nastepnyNumer() {
   const rok = new Date().getFullYear();
@@ -75,13 +82,18 @@ module.exports = {
     // Kanał prywatny
     const staff = config.role.staff;
     const kategoria = config.kanaly.kategoriaSprawy || null;
+    // Nadpisanie uprawnień dla osoby spoza serwera wysypałoby tworzenie kanału
+    const pozwanyId = idPozwanego(typ, pozwany);
+    const pozwanyNaSerwerze = pozwanyId && await interaction.guild.members.fetch(pozwanyId).catch(() => null);
+    const dostepStrony = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory];
     const kanal = await interaction.guild.channels.create({
       name: `${config.sad.prefixSprawy}${numer.toLowerCase()}`.slice(0, 90),
       type: ChannelType.GuildText,
       parent: kategoria,
       permissionOverwrites: [
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] },
+        { id: interaction.user.id, allow: dostepStrony },
+        ...(pozwanyNaSerwerze && pozwanyId !== interaction.user.id ? [{ id: pozwanyId, allow: dostepStrony }] : []),
         ...(staff ? [{ id: staff, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }] : []),
       ],
     });
