@@ -1,0 +1,7 @@
+node_modules/
+.env
+database/*.db
+database/*.db-journal
+transkrypty/
+*.log
+.DS_Store
