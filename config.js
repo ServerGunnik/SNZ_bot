@@ -10,6 +10,7 @@ module.exports = {
     logiTickety: process.env.KANAL_LOGI_TICKETY || process.env.KANAL_LOGI,
     logiSad: process.env.KANAL_LOGI_SAD || process.env.KANAL_LOGI,
     logiPanstwa: process.env.KANAL_LOGI_PANSTWA || process.env.KANAL_LOGI,
+    logiAntynuke: process.env.KANAL_LOGI_ANTYNUKE || process.env.KANAL_LOGI,
     weryfikacja: process.env.KANAL_WERYFIKACJA,
     ticket: process.env.KANAL_TICKET,
     listyGoncze: process.env.KANAL_LISTY_GONCZE,
@@ -45,6 +46,7 @@ module.exports = {
       { value: 'wspolpraca', label: 'Współpraca', emoji: 'skrzynia', opis: 'Propozycje i partnerstwa' },
     ],
     ocenaTimeoutMs: 15 * 60 * 1000,
+    minDlugoscWyjasnienia: 10,
   },
 
   panstwa: {
@@ -74,5 +76,37 @@ module.exports = {
   wolanieModa: {
     interwalPingMs: 90 * 1000,
     maxPingow: 3,
+  },
+
+  antynuke: {
+    wlaczony: process.env.ANTYNUKE_WYLACZONY !== 'true',
+    // Ile akcji danego typu w oknie czasowym uruchamia karę
+    oknoMs: 10 * 1000,
+    progi: {
+      ban: 3,
+      kick: 3,
+      kanalUsun: 3,
+      kanalUtworz: 5,
+      rolaUsun: 3,
+    },
+    // 'role' - odebranie wszystkich ról, 'kick' - wyrzucenie, 'ban' - ban
+    kara: process.env.ANTYNUKE_KARA || 'role',
+    // Cofanie szkód: odbanowanie, odtworzenie usuniętych kanałów/ról, usunięcie spamowanych kanałów
+    przywracaj: true,
+    // Wyrzucanie botów dodanych przez osoby spoza whitelisty
+    blokujBoty: true,
+    // Dodatkowa whitelista z .env (ID oddzielone przecinkami); właściciel serwera i bot są zawsze na whiteliście
+    whitelist: (process.env.ANTYNUKE_WHITELIST || '').split(',').map(s => s.trim()).filter(Boolean),
+  },
+
+  antyraid: {
+    wlaczony: process.env.ANTYRAID_WYLACZONY !== 'true',
+    // Ile dołączeń w oknie czasowym włącza tryb anty-raid
+    oknoMs: 15 * 1000,
+    progDolaczen: 8,
+    // Jak długo trwa tryb anty-raid (każdy nowy członek jest wyrzucany)
+    czasTrybuMs: 10 * 60 * 1000,
+    // Konta młodsze niż tyle dni, które wbiły w trakcie fali, też są wyrzucane
+    minWiekKontaDni: 7,
   },
 };

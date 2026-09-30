@@ -123,7 +123,7 @@ function kartaTicketu({ uzytkownik, kategoria, przydzielony = null }) {
     `**Zgłaszający:** <@${uzytkownik}>\n` +
     `**Kategoria:** ${kategoria}\n` +
     `**Obsługuje:** ${przydzielony ? `<@${przydzielony}>` : 'nikt jeszcze'}\n\n` +
-    'Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.'
+    'Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.\n-# Zamknięcie zgłoszenia wymaga wpisania wyjaśnienia, jak sprawa została rozwiązana.'
   ));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
@@ -133,11 +133,24 @@ function kartaTicketu({ uzytkownik, kategoria, przydzielony = null }) {
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaOcenyTicketu(ticketId) {
+function kartaWyjasnieniaTicketu({ zamykajacy, wyjasnienie }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## Wyjaśnienie zgłoszenia'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(`${wyjasnienie}\n\n**Zamyka:** <@${zamykajacy}>`));
+  c.addTextDisplayComponents(tekst('-# Kanał zostanie usunięty za 5 sekund.'));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaOcenyTicketu(ticketId, wyjasnienie = null) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst('## Oceń obsługę zgłoszenia'));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst('Twoje zgłoszenie zostało zamknięte. Wystaw ocenę od 1 do 5 — pomoże nam to podnosić jakość obsługi.'));
+  if (wyjasnienie) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`**Wyjaśnienie:**\n${wyjasnienie}`));
+  }
   c.addSeparatorComponents(separator(false));
   const row = new ActionRowBuilder();
   for (let i = 1; i <= 5; i++) {
@@ -161,7 +174,7 @@ function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Se
 
   const lista = czlonkowie.strona.length
     ? czlonkowie.strona.map((cz, i) => {
-        const num = (strona - 1) * czlonkowie.strona.length + i + 1;
+        const num = (strona - 1) * czlonkowie.naStrone + i + 1;
         const marker = listyGoncze.has(cz.nick.toLowerCase()) ? ' `[LIST GOŃCZY]`' : '';
         return `\`${String(num).padStart(2, '0')}\` **${cz.nick}**${marker}`;
       }).join('\n')
@@ -173,7 +186,7 @@ function kartaPanstwa({ panstwo, czlonkowie, strona, stron, listyGoncze = new Se
 
   const rowAkcje = new ActionRowBuilder().addComponents(
     przycisk(`panstwo:dodaj:${panstwo.id}`, 'Dodaj nick', ButtonStyle.Success),
-    przycisk(`panstwo:usun:${panstwo.id}`, 'Usuń nick', ButtonStyle.Danger, null, czlonkowie.total === 0),
+    przycisk(`panstwo:usun:${panstwo.id}:${strona}`, 'Usuń nick', ButtonStyle.Danger, null, czlonkowie.total === 0),
   );
   c.addActionRowComponents(rowAkcje);
 
@@ -294,10 +307,12 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   c.addSeparatorComponents(separator(false));
 
   const przyciski = [];
-  if (sprawa.status === 'zlozona') {
-    przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`, 'Przyjmij sprawę', ButtonStyle.Success));
+  const czekaNaSedziego = sprawa.status === 'zlozona' || (sprawa.status === 'odwolanie' && !sprawa.sedzia_id);
+  if (czekaNaSedziego) {
+    przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`,
+      sprawa.status === 'odwolanie' ? 'Przyjmij odwołanie' : 'Przyjmij sprawę', ButtonStyle.Success));
   }
-  if (['przyjeta', 'w_toku', 'odwolanie'].includes(sprawa.status)) {
+  if (['przyjeta', 'w_toku', 'odwolanie'].includes(sprawa.status) && sprawa.sedzia_id) {
     przyciski.push(
       przycisk(`sad:dowod:${sprawa.id}`, 'Dodaj dowód', ButtonStyle.Secondary),
       przycisk(`sad:wyrok:${sprawa.id}`, 'Wydaj wyrok', ButtonStyle.Primary),
@@ -397,7 +412,7 @@ module.exports = {
   FLAGS_V2,
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
-  panelWeryfikacji, panelTicketow, kartaTicketu, kartaOcenyTicketu,
+  panelWeryfikacji, panelTicketow, kartaTicketu, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
   kartaPanstwa,
   kartaListuGonczego, kartaZgloszeniaListu,
   kartaSprawy, kartaWyroku,

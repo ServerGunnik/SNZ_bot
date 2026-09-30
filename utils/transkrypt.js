@@ -13,6 +13,16 @@ async function zbierzWiadomosci(kanal, limit = 500) {
   return wiadomosci.reverse();
 }
 
+// Tekst z kart Components V2 (TextDisplay zagnieżdżone w kontenerach/sekcjach)
+function tekstKomponentow(komponenty) {
+  const wynik = [];
+  for (const k of komponenty || []) {
+    if (typeof k.content === 'string') wynik.push(k.content);
+    if (k.components?.length) wynik.push(...tekstKomponentow(k.components));
+  }
+  return wynik;
+}
+
 function formatujTekst(wiadomosci, kanal) {
   const linie = [];
   linie.push(`=== Transkrypt kanału #${kanal.name} (${kanal.id}) ===`);
@@ -25,7 +35,10 @@ function formatujTekst(wiadomosci, kanal) {
     const zalaczniki = w.attachments.size
       ? '\n  załączniki: ' + [...w.attachments.values()].map(a => a.url).join(', ')
       : '';
-    const komponenty = w.components?.length ? '\n  [wiadomość z komponentami]' : '';
+    const tekstKart = tekstKomponentow(w.components);
+    const komponenty = tekstKart.length
+      ? '\n  ' + tekstKart.join('\n').split('\n').join('\n  ')
+      : (w.components?.length ? '\n  [wiadomość z komponentami]' : '');
     linie.push(`[${czas}] ${autor}: ${tresc}${zalaczniki}${komponenty}`);
   }
   return linie.join('\n');

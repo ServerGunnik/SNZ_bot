@@ -1,6 +1,6 @@
 const {
   ChannelType, PermissionFlagsBits, MessageFlags,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
@@ -15,7 +15,8 @@ const q = {
   wstaw: db.prepare("INSERT INTO tickety (kanal_id, user_id, kategoria, otwarty) VALUES (?, ?, ?, ?)"),
   poKanale: db.prepare('SELECT * FROM tickety WHERE kanal_id = ?'),
   przydziel: db.prepare('UPDATE tickety SET przydzielony = ? WHERE id = ?'),
-  zamknij: db.prepare("UPDATE tickety SET status = 'zamkniety', zamkniety = ? WHERE id = ?"),
+  poId: db.prepare('SELECT * FROM tickety WHERE id = ?'),
+  zamknij: db.prepare("UPDATE tickety SET status = 'zamkniety', zamkniety = ?, zamknal = ?, wyjasnienie = ? WHERE id = ?"),
   ocen: db.prepare('UPDATE tickety SET ocena = ? WHERE id = ?'),
 };
 
@@ -78,9 +79,9 @@ async function onPrzejmij(interaction) {
     });
   }
   const ticket = q.poKanale.get(interaction.channel.id);
-  if (!ticket) {
+  if (!ticket || ticket.status !== 'otwarty') {
     return interaction.reply({
-      ...karty.kartaBlad('Brak ticketu', 'Ten kanał nie jest ticketem.'),
+      ...karty.kartaBlad('Brak ticketu', 'Ten kanał nie jest otwartym ticketem.'),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
@@ -94,7 +95,12 @@ async function onPrzejmij(interaction) {
 
 async function onZamknij(interaction) {
   const ticket = q.poKanale.get(interaction.channel.id);
-  if (!ticket) return;
+  if (!ticket || ticket.status !== 'otwarty') {
+    return interaction.reply({
+      ...karty.kartaBlad('Brak ticketu', 'Ten kanał nie jest otwartym ticketem.'),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
   const czyStaff = jestStaff(interaction.member);
   const czyAutor = ticket.user_id === interaction.user.id;
   if (!czyStaff && !czyAutor) {
@@ -103,49 +109,72 @@ async function onZamknij(interaction) {
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
-  const c = karty.kontener(0xf1c40f);
-  c.addTextDisplayComponents(karty.tekst('## Potwierdź zamknięcie'));
-  c.addSeparatorComponents(karty.separator(true));
-  c.addTextDisplayComponents(karty.tekst('Ta operacja jest nieodwracalna. Kanał zostanie usunięty, a autor otrzyma prośbę o ocenę.'));
-  c.addSeparatorComponents(karty.separator(false));
-  c.addActionRowComponents(new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`ticket:zamknij-potw:${ticket.id}`).setLabel('Tak, zamknij').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('ticket:zamknij-anuluj').setLabel('Anuluj').setStyle(ButtonStyle.Secondary),
+  // Zamknięcie wymaga wyjaśnienia, jak sprawa została rozwiązana
+  const modal = new ModalBuilder()
+    .setCustomId(`ticket:zamknij-modal:${ticket.id}`)
+    .setTitle('Zamknięcie zgłoszenia');
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder()
+      .setCustomId('wyjasnienie')
+      .setLabel('Wyjaśnienie — jak sprawa została rozwiązana?')
+      .setPlaceholder('Opisz, co ustalono i jak rozwiązano zgłoszenie. Autor otrzyma to wyjaśnienie.')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMinLength(config.tickety.minDlugoscWyjasnienia)
+      .setMaxLength(1000)
+      .setRequired(true)
   ));
-  await interaction.reply({ components: [c], flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
+  await interaction.showModal(modal);
 }
 
-async function onZamknijAnuluj(interaction) {
-  await interaction.update(karty.kartaSukces('Anulowano', 'Ticket pozostaje otwarty.'));
-}
-
-async function onZamknijPotwierdz(interaction) {
+async function onZamknijModal(interaction) {
   const [, , idStr] = interaction.customId.split(':');
-  const ticket = db.prepare('SELECT * FROM tickety WHERE id = ?').get(parseInt(idStr, 10));
-  if (!ticket) return;
+  const ticket = q.poId.get(parseInt(idStr, 10));
+  if (!ticket || ticket.status !== 'otwarty' || ticket.kanal_id !== interaction.channel?.id) {
+    return interaction.reply({
+      ...karty.kartaBlad('Nie można zamknąć', 'Ten ticket jest już zamknięty lub nie należy do tego kanału.'),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
+  if (!jestStaff(interaction.member) && ticket.user_id !== interaction.user.id) {
+    return interaction.reply({
+      ...karty.kartaBlad('Brak uprawnień', 'Ticket może zamknąć autor lub staff.'),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
+  const wyjasnienie = interaction.fields.getTextInputValue('wyjasnienie').trim();
+  if (wyjasnienie.length < config.tickety.minDlugoscWyjasnienia) {
+    return interaction.reply({
+      ...karty.kartaBlad('Za krótkie wyjaśnienie', `Wyjaśnienie musi mieć co najmniej ${config.tickety.minDlugoscWyjasnienia} znaków.`),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
 
-  await interaction.update(karty.kartaOstrzezenie('Zamykanie...', 'Generuję transkrypt i usuwam kanał.'));
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  q.zamknij.run(Date.now(), interaction.user.id, wyjasnienie, ticket.id);
 
-  // Transkrypt
-  const zalacznik = await transkrypt(interaction.channel);
+  // Wyjaśnienie widoczne w kanale (trafi też do transkryptu)
+  await interaction.channel.send(karty.kartaWyjasnieniaTicketu({ zamykajacy: interaction.user.id, wyjasnienie })).catch(() => null);
+
+  const zalacznik = await transkrypt(interaction.channel).catch(() => null);
   await wyslij(interaction.client, config.kanaly.logiTickety, {
     ...karty.kartaInfo({
       tytul: 'Ticket zamknięty',
-      opis: `**Ticket:** ${interaction.channel.name}\n**Autor:** <@${ticket.user_id}>\n**Zamknął:** <@${interaction.user.id}>\n**Kategoria:** ${ticket.kategoria}`,
+      opis:
+        `**Ticket:** ${interaction.channel.name}\n**Autor:** <@${ticket.user_id}>\n**Zamknął:** <@${interaction.user.id}>\n` +
+        `**Kategoria:** ${ticket.kategoria}\n**Obsługiwał:** ${ticket.przydzielony ? `<@${ticket.przydzielony}>` : '_nikt_'}\n\n` +
+        `**Wyjaśnienie:**\n${wyjasnienie}`,
       kolor: kolory.neutralny,
     }),
-    files: [zalacznik],
+    ...(zalacznik ? { files: [zalacznik] } : {}),
   });
 
-  q.zamknij.run(Date.now(), ticket.id);
-
-  // Ocena w DM
+  // Ocena w DM razem z wyjaśnieniem
   const user = await interaction.client.users.fetch(ticket.user_id).catch(() => null);
   if (user) {
-    await user.send(karty.kartaOcenyTicketu(ticket.id)).catch(() => null);
+    await user.send(karty.kartaOcenyTicketu(ticket.id, wyjasnienie)).catch(() => null);
   }
 
-  await interaction.channel.send(karty.kartaSukces('Ticket zamknięty', 'Kanał zostanie usunięty za 5 sekund.'));
+  await interaction.editReply(karty.kartaSukces('Ticket zamknięty', 'Kanał zostanie usunięty za 5 sekund.'));
   setTimeout(() => interaction.channel.delete('Ticket zamknięty').catch(() => null), 5000);
 }
 
@@ -158,8 +187,7 @@ async function onOcena(interaction) {
 function rejestruj({ zarejestruj }) {
   zarejestruj('ticket:kategoria', onKategoriaSelect);
   zarejestruj('ticket:przejmij', onPrzejmij);
-  zarejestruj('ticket:zamknij-potw', onZamknijPotwierdz);
-  zarejestruj('ticket:zamknij-anuluj', onZamknijAnuluj);
+  zarejestruj('ticket:zamknij-modal', onZamknijModal);
   zarejestruj('ticket:zamknij', onZamknij);
   zarejestruj('ticket:ocena', onOcena);
 }

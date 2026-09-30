@@ -1,11 +1,10 @@
 const {
   MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
-  PermissionFlagsBits,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestStaff, jestSedzia } = require('../utils/uprawnienia.js');
+const { jestStaff } = require('../utils/uprawnienia.js');
 const { log, wyslij } = require('../utils/logger.js');
 const { transkrypt } = require('../utils/transkrypt.js');
 const kolory = require('../utils/kolory.js');
@@ -39,6 +38,11 @@ async function aktualizujKarteSprawy(client, sprawaId) {
 
 function czyStronaSprawy(sprawa, userId) {
   if (sprawa.pozywajacy_id === userId) return true;
+  // Pozwany gracz (po zweryfikowanym nicku)
+  if (sprawa.pozwany_typ === 'nick') {
+    const wer = q.weryfikacjaPoNicku.get(sprawa.pozwany_wartosc);
+    if (wer?.user_id === userId) return true;
+  }
   // Sprawdź czy user jest liderem państwa, którego dotyczy sprawa
   const lider = q.panstwoLidera.get(userId);
   if (!lider) return false;
@@ -132,7 +136,12 @@ async function onDowodModal(interaction) {
   const [, , idStr] = interaction.customId.split(':');
   const id = parseInt(idStr, 10);
   const sprawa = q.poId.get(id);
-  if (!sprawa) return;
+  if (!sprawa || !['zlozona', 'przyjeta', 'w_toku', 'odwolanie'].includes(sprawa.status)) {
+    return interaction.reply({
+      ...karty.kartaOstrzezenie('Sprawa zamknięta', 'Do tej sprawy nie można już dodawać dowodów.'),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    });
+  }
   const tresc = interaction.fields.getTextInputValue('tresc').trim();
   q.wstawDowod.run(id, interaction.user.id, tresc, Date.now());
   await aktualizujKarteSprawy(interaction.client, id);
@@ -160,7 +169,8 @@ async function onWyrok(interaction) {
         .setStyle(TextInputStyle.Paragraph).setMinLength(5).setMaxLength(1500).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('kara').setLabel('Kara (np. ostrzeżenie, grzywna, ban, uniewinnienie)')
+      new TextInputBuilder().setCustomId('kara').setLabel('Kara')
+        .setPlaceholder('np. ostrzeżenie, grzywna, ban, uniewinnienie')
         .setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
@@ -273,6 +283,11 @@ async function zamknijSprawe(client, sprawaId, przezUserId) {
   if (!sprawa) return;
   q.zamknij.run(Date.now(), sprawaId);
   const kanal = await client.channels.fetch(sprawa.kanal_id).catch(() => null);
+  // Sprawa zamknięta bez wyroku - sędzia traci rolę (jeśli nie prowadzi innej sprawy)
+  if (kanal && sprawa.sedzia_id && sprawa.status !== 'wyrok' && config.role.sedzia && !q.aktywnaSedziego.get(sprawa.sedzia_id)) {
+    const sedzia = await kanal.guild.members.fetch(sprawa.sedzia_id).catch(() => null);
+    if (sedzia) await sedzia.roles.remove(config.role.sedzia, `Zamknięto sprawę ${sprawa.numer}`).catch(() => {});
+  }
   if (kanal) {
     const zal = await transkrypt(kanal).catch(() => null);
     await wyslij(client, config.kanaly.logiSad, {

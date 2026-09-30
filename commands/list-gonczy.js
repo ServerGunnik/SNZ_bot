@@ -4,7 +4,7 @@ const config = require('../config.js');
 const karty = require('../utils/karty.js');
 const { jestStaff, jestLider } = require('../utils/uprawnienia.js');
 const { walidujNick } = require('../utils/minecraft.js');
-const { opublikujList, kartaListuDoWiadomosci } = require('../modules/listy-goncze.js');
+const { opublikujList } = require('../modules/listy-goncze.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 
@@ -63,14 +63,13 @@ module.exports = {
       // Zgłoszenie do zatwierdzenia staffowi
       await log(interaction.client, {
         tytul: 'List gończy oczekuje zatwierdzenia',
-        opis: `**ID:** #${listId}\n**Nick:** \`${nick}\`\n**Powód:** ${powod}\n**Nagroda:** ${nagroda || 'brak'}\n**Wystawca:** <@${interaction.user.id}>${panstwoLidera ? ` (${panstwoLidera.nazwa})` : ''}\n\nUżyj \`/list-gonczy-zatwierdz\` lub \`/list-gonczy-odrzuc\` w kanale ${config.kanaly.listyGoncze ? `<#${config.kanaly.listyGoncze}>` : 'listów'}.`,
+        opis: `**ID:** #${listId}\n**Nick:** \`${nick}\`\n**Powód:** ${powod}\n**Nagroda:** ${nagroda || 'brak'}\n**Wystawca:** <@${interaction.user.id}>${panstwoLidera ? ` (${panstwoLidera.nazwa})` : ''}\n\nUżyj \`/list-gonczy-admin zatwierdz id:${listId}\` lub \`/list-gonczy-admin odrzuc id:${listId}\`.`,
         kolor: kolory.ostrzezenie,
       });
       await interaction.reply({
-        ...karty.kartaOstrzezenie('Oczekuje zatwierdzenia', `List **#${listId}** trafił do staffu. Otrzymasz powiadomienie po zatwierdzeniu.`),
+        ...karty.kartaOstrzezenie('Oczekuje zatwierdzenia', `List **#${listId}** trafił do staffu. Otrzymasz wiadomość prywatną po rozpatrzeniu.`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
     }
-    void kartaListuDoWiadomosci;
   },
 };

@@ -39,7 +39,7 @@ async function pokazPanstwo(interaction, panstwo, strona = 1) {
   const p = stronicuj(wszyscy, strona, config.panstwa.czlonkowNaStrone);
   const karta = karty.kartaPanstwa({
     panstwo,
-    czlonkowie: { strona: p.strona, total: wszyscy.length },
+    czlonkowie: { strona: p.strona, total: wszyscy.length, naStrone: config.panstwa.czlonkowNaStrone },
     strona: p.aktualnaStrona,
     stron: p.stron,
     listyGoncze: aktywneListySet(),
@@ -120,7 +120,7 @@ async function onModalDodaj(interaction) {
 }
 
 async function onUsun(interaction) {
-  const [, , idStr] = interaction.customId.split(':');
+  const [, , idStr, stronaStr] = interaction.customId.split(':');
   const panstwo = panstwoPoId(parseInt(idStr, 10));
   if (!panstwo || (panstwo.lider_id !== interaction.user.id && !jestStaff(interaction.member))) {
     return interaction.reply({
@@ -135,11 +135,13 @@ async function onUsun(interaction) {
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
+  // Lista z bieżącej strony panelu (max 25 opcji w selekcie)
+  const p = stronicuj(wszyscy, parseInt(stronaStr, 10) || 1, Math.min(config.panstwa.czlonkowNaStrone, 25));
   const select = new StringSelectMenuBuilder()
     .setCustomId(`panstwo:usun-select:${panstwo.id}`)
-    .setPlaceholder('Wybierz członka do usunięcia')
+    .setPlaceholder(`Wybierz członka do usunięcia (strona ${p.aktualnaStrona}/${p.stron})`)
     .setMinValues(1).setMaxValues(1)
-    .addOptions(wszyscy.slice(0, 25).map(c =>
+    .addOptions(p.strona.map(c =>
       new StringSelectMenuOptionBuilder().setLabel(c.nick).setValue(String(c.id))
     ));
   const c = karty.kontener(kolory.ostrzezenie);
@@ -158,7 +160,9 @@ async function onUsunSelect(interaction) {
   if (!panstwo) return;
   const czlonekId = parseInt(interaction.values[0], 10);
   const czlonek = db.prepare('SELECT * FROM panstwa_czlonkowie WHERE id = ?').get(czlonekId);
-  if (!czlonek) return;
+  if (!czlonek || czlonek.panstwo_id !== panstwo.id) {
+    return interaction.update(karty.kartaOstrzezenie('Brak członka', 'Ten nick został już usunięty.'));
+  }
   q.usunCzlonka.run(czlonekId);
   await log(interaction.client, {
     tytul: 'Usunięto członka państwa',
