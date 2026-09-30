@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS panstwa (
   nazwa TEXT NOT NULL UNIQUE COLLATE NOCASE,
   lider_id TEXT,
   limit_czlonkow INTEGER NOT NULL DEFAULT 20,
+  sojusznik INTEGER NOT NULL DEFAULT 1, -- 1 = państwo w sojuszu (pole "allay" w configu moda)
   utworzone INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_panstwa_lider ON panstwa(lider_id);
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS panstwa_czlonkowie (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   panstwo_id INTEGER NOT NULL,
   nick TEXT NOT NULL COLLATE NOCASE,
+  status TEXT NOT NULL DEFAULT 'czlonek', -- 'zastepca' | 'czlonek' (Król = lider państwa)
   dodany INTEGER NOT NULL,
   dodany_przez TEXT,
   UNIQUE(nick COLLATE NOCASE),

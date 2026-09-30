@@ -22,5 +22,7 @@ dodajKolumne('tickety', 'wyjasnienie', 'TEXT');
 dodajKolumne('tickety', 'temat', 'TEXT');
 dodajKolumne('tickety', 'opis', 'TEXT');
 dodajKolumne('tickety', 'wiadomosc_id', 'TEXT');
+dodajKolumne('panstwa', 'sojusznik', 'INTEGER NOT NULL DEFAULT 1');
+dodajKolumne('panstwa_czlonkowie', 'status', "TEXT NOT NULL DEFAULT 'czlonek'");
 
 module.exports = db;

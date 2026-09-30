@@ -40,7 +40,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 - `/panel-weryfikacji` — wystawia panel weryfikacji w bieżącym kanale.
 - `/panel-ticket` — wystawia panel ticketów.
 - `/selfrole grupa-utworz|grupa-usun|grupa-lista|rola-dodaj|rola-usun|wystaw` — pełne zarządzanie selfrole.
-- `/panstwo utworz|zmien-lidera|limit|rozwiaz|lista` — państwa i liderzy (rola nadawana/odbierana automatycznie).
+- `/panstwo utworz|zmien-lidera|limit|sojusznik|rozwiaz|lista` — państwa i liderzy (rola nadawana/odbierana automatycznie), `sojusznik` ustawia pole `allay` w configu moda.
 - `/list-gonczy-admin zatwierdz|odrzuc|zamknij` — zatwierdzanie i zamykanie listów.
 - `/sprawa-zamknij` — zamknięcie sprawy sądowej (z transkryptem).
 - `/warn`, `/warny`, `/usun-warn` — moderacja.
@@ -48,21 +48,27 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 - `/antynuke whitelist-dodaj|whitelist-usun` — tylko właściciel serwera.
 
 ### Liderzy (rola „Lider")
-- `/sojusz` — panel państwa (dodaj/usuń nick, paginacja).
+- `/sojusz` — panel państwa dla króla (dodaj/usuń nick, zmień status Zastępca/Członek, paginacja). Tylko król może zarządzać składem.
 - `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff).
 - `/pozew` — pozew do Sądu Sojuszniczego.
 
 ### Wszyscy
+- `/sojusz-lista` — lista państw i ich graczy (król, zastępcy, członkowie) + przycisk **Config dla moda** (plik `snz-sojusz.json`).
 - `/warny <user>` — własna historia (staff widzi wszystkich).
 - Panele: weryfikacja, tickety, selfrole (przyciski/selecty).
 
 ## Moduły
 
 - **Weryfikacja**: przycisk → modal z nickiem MC → walidacja + unikalność → rola + nick.
-- **Tickety**: kategorie, **formularz przy otwieraniu (temat + opis — podsumowanie na karcie ticketu)**, **🔒 Panel staffu na dole karty — notatki administracji widoczne tylko dla staffu (gracz ich nie widzi), dołączane do logu i transkryptu po zamknięciu**, limit otwartych, przejmowanie przez staff, **zamknięcie wymaga wpisania wyjaśnienia** (jak rozwiązano sprawę — trafia do kanału, logu, transkryptu i DM autora), transkrypt po zamknięciu, ocena 1–5 w DM.
+- **Tickety**: zamyka wyłącznie administracja, kategorie, **formularz przy otwieraniu (temat + opis — podsumowanie na karcie ticketu)**, **🔒 Panel staffu na dole karty — notatki administracji widoczne tylko dla staffu (gracz ich nie widzi), dołączane do logu i transkryptu po zamknięciu**, limit otwartych, przejmowanie przez staff, **zamknięcie wymaga wpisania wyjaśnienia** (jak rozwiązano sprawę — trafia do kanału, logu, transkryptu i DM autora), transkrypt po zamknięciu, ocena 1–5 w DM.
 - **Selfrole**: grupy w bazie, tryb single/multi, panel wystawiany na dowolnym kanale.
 - **Wołanie moderatora**: wejście na „Poczekalnię" pinguje staff, po przyjęciu bot przenosi wołającego i staffa na wolny kanał Pomoc 1-3, log czasu oczekiwania, cykliczne przypomnienia.
-- **Państwa + `/sojusz`**: staff tworzy państwo i nadaje lidera (rola automatyczna), lider zarządza tylko swoim państwem (paginacja, dodaj/usuń), nick unikalny globalnie, limit członków.
+- **Państwa + `/sojusz`**: staff tworzy państwo i nadaje lidera (króla, rola automatyczna). Tylko król zarządza swoim państwem (dodaj/usuń, statusy), gracz może należeć tylko do jednego państwa, limit członków. Status **Król** ma zawsze lider (jego nick z weryfikacji), pozostali to **Zastępca** lub **Członek**.
+- **Config dla moda**: `/sojusz-lista` → „Config dla moda” wysyła plik JSON w formacie:
+  ```json
+  [{ "nick": "Steve", "allay": true, "status": "Król", "kingdom": "Polska" }]
+  ```
+  Nazwy statusów i nazwa pliku są w `config.js` → `panstwa`.
 - **Listy gończe**: głowa skina z `mc-heads.net`, statusy `oczekuje/aktywny/zrealizowany/wygasly/odrzucony`, zgłoszenia zatrzymania (modal z dowodem) rozpatrywane przez staff, wygasanie sprawdzane co godzinę.
 - **Sąd sojuszniczy**: `/pozew` tworzy prywatny kanał ze sprawą (numer `SNZ-YYYY-NNNN`), staff przyjmuje sprawę (max jedna aktywna na sędziego, blokada dla stron sprawy i poprzedniego sędziego przy odwołaniu), rola „Sędzia" nadawana/odbierana automatycznie, publikacja wyroku w kanale wyroków, opcjonalny automatyczny list gończy na skazanego, transkrypt po zamknięciu.
 - **Ostrzeżenia**: `/warn`, `/warny`, `/usun-warn`, konfigurowalne progi (auto-mute i auto-ban).

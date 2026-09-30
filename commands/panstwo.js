@@ -13,9 +13,21 @@ const q = {
   utworz: db.prepare('INSERT INTO panstwa (nazwa, lider_id, limit_czlonkow, utworzone) VALUES (?, ?, ?, ?)'),
   zmienLidera: db.prepare('UPDATE panstwa SET lider_id = ? WHERE id = ?'),
   ustawLimit: db.prepare('UPDATE panstwa SET limit_czlonkow = ? WHERE id = ?'),
+  ustawSojusznik: db.prepare('UPDATE panstwa SET sojusznik = ? WHERE id = ?'),
   rozwiaz: db.prepare('DELETE FROM panstwa WHERE id = ?'),
   wszystkie: db.prepare('SELECT * FROM panstwa ORDER BY nazwa'),
+  nickUsera: db.prepare('SELECT nick FROM weryfikacja WHERE user_id = ?'),
+  czlonekPoNicku: db.prepare('SELECT * FROM panstwa_czlonkowie WHERE nick = ? COLLATE NOCASE'),
 };
+
+// Jeden gracz = jedno państwo: nick króla nie może być członkiem innego państwa
+function konfliktKrola(userId, panstwoId = null) {
+  const nick = q.nickUsera.get(userId)?.nick;
+  if (!nick) return null;
+  const czlonek = q.czlonekPoNicku.get(nick);
+  if (!czlonek || czlonek.panstwo_id === panstwoId) return null;
+  return { nick, panstwo: q.poId.get(czlonek.panstwo_id) };
+}
 
 async function nadajRoleLidera(guild, userId) {
   if (!config.role.lider) return;
@@ -52,6 +64,10 @@ module.exports = {
     )
     .addSubcommand(s => s.setName('rozwiaz').setDescription('Rozwiąż państwo')
       .addStringOption(o => o.setName('nazwa').setDescription('Państwo').setRequired(true).setAutocomplete(true))
+    )
+    .addSubcommand(s => s.setName('sojusznik').setDescription('Czy państwo jest w sojuszu (pole "allay" w configu moda)')
+      .addStringOption(o => o.setName('nazwa').setDescription('Państwo').setRequired(true).setAutocomplete(true))
+      .addBooleanOption(o => o.setName('sojusznik').setDescription('tak = w sojuszu, nie = poza sojuszem').setRequired(true))
     )
     .addSubcommand(s => s.setName('lista').setDescription('Lista wszystkich państw')),
 
@@ -90,6 +106,13 @@ module.exports = {
           flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
         });
       }
+      const konflikt = konfliktKrola(lider.id);
+      if (konflikt) {
+        return interaction.reply({
+          ...karty.kartaBlad('Gracz w innym państwie', `Nick \`${konflikt.nick}\` jest członkiem państwa **${konflikt.panstwo?.nazwa || '???'}**. Niech tamten król go najpierw usunie.`),
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+        });
+      }
       const info = q.utworz.run(nazwa, lider.id, limit, Date.now());
       await nadajRoleLidera(interaction.guild, lider.id);
       await log(interaction.client, {
@@ -115,6 +138,13 @@ module.exports = {
       if (q.poLiderze.get(nowy.id) && q.poLiderze.get(nowy.id).id !== panstwo.id) {
         return interaction.reply({
           ...karty.kartaBlad('Konflikt lidera', 'Ten użytkownik jest już liderem innego państwa.'),
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+        });
+      }
+      const konflikt = konfliktKrola(nowy.id, panstwo.id);
+      if (konflikt) {
+        return interaction.reply({
+          ...karty.kartaBlad('Gracz w innym państwie', `Nick \`${konflikt.nick}\` jest członkiem państwa **${konflikt.panstwo?.nazwa || '???'}**. Niech tamten król go najpierw usunie.`),
           flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
         });
       }
@@ -171,6 +201,27 @@ module.exports = {
       });
       return interaction.reply({
         ...karty.kartaSukces('Państwo rozwiązane', `Państwo **${panstwo.nazwa}** przestało istnieć.`),
+        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+      });
+    }
+
+    if (sub === 'sojusznik') {
+      const nazwa = interaction.options.getString('nazwa');
+      const sojusznik = interaction.options.getBoolean('sojusznik');
+      const panstwo = q.poNazwie.get(nazwa);
+      if (!panstwo) return interaction.reply({
+        ...karty.kartaBlad('Brak państwa', `Nie znaleziono państwa **${nazwa}**.`),
+        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+      });
+      q.ustawSojusznik.run(sojusznik ? 1 : 0, panstwo.id);
+      await log(interaction.client, {
+        tytul: 'Zmieniono status sojuszu',
+        opis: `**Państwo:** ${panstwo.nazwa}\n**W sojuszu:** ${sojusznik ? 'tak' : 'nie'}\n**Zmienił:** <@${interaction.user.id}>`,
+        kolor: kolory.info,
+        kanal: 'logiPanstwa',
+      });
+      return interaction.reply({
+        ...karty.kartaSukces('Zapisano', `**${panstwo.nazwa}** — ${sojusznik ? 'w sojuszu' : 'poza sojuszem'} (\`allay: ${sojusznik}\`).`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
     }

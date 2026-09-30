@@ -206,11 +206,10 @@ async function onZamknij(interaction) {
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
-  const czyStaff = jestStaff(interaction.member);
-  const czyAutor = ticket.user_id === interaction.user.id;
-  if (!czyStaff && !czyAutor) {
+  // Zgłoszenie zamyka wyłącznie administracja (gracz nie może zamknąć własnego ticketu)
+  if (!jestStaff(interaction.member)) {
     return interaction.reply({
-      ...karty.kartaBlad('Brak uprawnień', 'Ticket może zamknąć autor lub staff.'),
+      ...karty.kartaBlad('Brak uprawnień', 'Zgłoszenie może zamknąć tylko administracja.'),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
@@ -240,9 +239,9 @@ async function onZamknijModal(interaction) {
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
-  if (!jestStaff(interaction.member) && ticket.user_id !== interaction.user.id) {
+  if (!jestStaff(interaction.member)) {
     return interaction.reply({
-      ...karty.kartaBlad('Brak uprawnień', 'Ticket może zamknąć autor lub staff.'),
+      ...karty.kartaBlad('Brak uprawnień', 'Zgłoszenie może zamknąć tylko administracja.'),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }

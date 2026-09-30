@@ -52,6 +52,14 @@ module.exports = {
   panstwa: {
     domyslnyLimitCzlonkow: 20,
     czlonkowNaStrone: 12,
+    panstwNaStrone: 8,
+    // Nazwy statusów widoczne w bocie i w configu moda (pole "status")
+    statusy: {
+      krol: 'Król',
+      zastepca: 'Zastępca',
+      czlonek: 'Członek',
+    },
+    plikConfigu: 'snz-sojusz.json',
   },
 
   listyGoncze: {
