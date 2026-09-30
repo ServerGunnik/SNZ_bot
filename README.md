@@ -59,7 +59,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 ## Moduły
 
 - **Weryfikacja**: przycisk → modal z nickiem MC → walidacja + unikalność → rola + nick.
-- **Tickety**: kategorie, limit otwartych, przejmowanie przez staff, **zamknięcie wymaga wpisania wyjaśnienia** (jak rozwiązano sprawę — trafia do kanału, logu, transkryptu i DM autora), transkrypt po zamknięciu, ocena 1–5 w DM.
+- **Tickety**: kategorie, **formularz przy otwieraniu (temat + opis — podsumowanie na karcie ticketu)**, **🔒 Panel staffu na dole karty — notatki administracji widoczne tylko dla staffu (gracz ich nie widzi), dołączane do logu i transkryptu po zamknięciu**, limit otwartych, przejmowanie przez staff, **zamknięcie wymaga wpisania wyjaśnienia** (jak rozwiązano sprawę — trafia do kanału, logu, transkryptu i DM autora), transkrypt po zamknięciu, ocena 1–5 w DM.
 - **Selfrole**: grupy w bazie, tryb single/multi, panel wystawiany na dowolnym kanale.
 - **Wołanie moderatora**: wejście na „Poczekalnię" pinguje staff, po przyjęciu bot przenosi wołającego i staffa na wolny kanał Pomoc 1-3, log czasu oczekiwania, cykliczne przypomnienia.
 - **Państwa + `/sojusz`**: staff tworzy państwo i nadaje lidera (rola automatyczna), lider zarządza tylko swoim państwem (paginacja, dodaj/usuń), nick unikalny globalnie, limit członków.

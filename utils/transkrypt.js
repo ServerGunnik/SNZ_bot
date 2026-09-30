@@ -44,9 +44,10 @@ function formatujTekst(wiadomosci, kanal) {
   return linie.join('\n');
 }
 
-async function transkrypt(kanal) {
+async function transkrypt(kanal, { dopisek = [] } = {}) {
   const wiadomosci = await zbierzWiadomosci(kanal);
-  const tekst = formatujTekst(wiadomosci, kanal);
+  let tekst = formatujTekst(wiadomosci, kanal);
+  if (dopisek.length) tekst += '\n\n' + dopisek.join('\n');
   const buffer = Buffer.from(tekst, 'utf8');
   return new AttachmentBuilder(buffer, { name: `transkrypt-${kanal.name}-${Date.now()}.txt` });
 }

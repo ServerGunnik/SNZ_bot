@@ -115,20 +115,60 @@ function panelTicketow(kategorie) {
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaTicketu({ uzytkownik, kategoria, przydzielony = null }) {
+function kartaTicketu({ ticketId = null, uzytkownik, kategoria, przydzielony = null, temat = null, opis = null }) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst(`## Zgłoszenie — ${kategoria}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Zgłaszający:** <@${uzytkownik}>\n` +
     `**Kategoria:** ${kategoria}\n` +
-    `**Obsługuje:** ${przydzielony ? `<@${przydzielony}>` : 'nikt jeszcze'}\n\n` +
-    'Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.\n-# Zamknięcie zgłoszenia wymaga wpisania wyjaśnienia, jak sprawa została rozwiązana.'
+    `**Obsługuje:** ${przydzielony ? `<@${przydzielony}>` : 'nikt jeszcze'}`
   ));
+  c.addSeparatorComponents(separator(true));
+  if (temat || opis) {
+    c.addTextDisplayComponents(tekst(`### ${temat || 'Opis sprawy'}\n${opis || ''}`));
+  } else {
+    c.addTextDisplayComponents(tekst('Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.'));
+  }
+  c.addTextDisplayComponents(tekst('-# Zamknięcie zgłoszenia wymaga wpisania wyjaśnienia, jak sprawa została rozwiązana.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
     przycisk('ticket:przejmij', 'Przejmij', ButtonStyle.Primary),
     przycisk('ticket:zamknij', 'Zamknij zgłoszenie', ButtonStyle.Danger)
+  ));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')
+  ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Lista notatek przycięta do limitu znaków (najnowsze mają pierwszeństwo)
+function listaNotatek(notatki, limitZnakow = 3000) {
+  const linie = [];
+  let dlugosc = 0;
+  for (let i = notatki.length - 1; i >= 0; i--) {
+    const n = notatki[i];
+    const linia = `<@${n.autor_id}> <t:${Math.floor(n.data / 1000)}:t> — ${n.tresc}`;
+    if (dlugosc + linia.length + 1 > limitZnakow) {
+      linie.unshift(`-# …oraz ${i + 1} starszych (pełna lista w transkrypcie po zamknięciu)`);
+      break;
+    }
+    linie.unshift(linia);
+    dlugosc += linia.length + 1;
+  }
+  return linie.join('\n');
+}
+
+function kartaNotatekTicketu({ ticketId, notatki }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## 🔒 Panel staffu — notatki'));
+  c.addTextDisplayComponents(tekst('-# Widoczne tylko dla administracji. Gracz nie widzi tych notatek.'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(notatki.length ? listaNotatek(notatki) : '_Brak notatek. Dodaj pierwszą przyciskiem poniżej._'));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(`ticket:notatka-dodaj:${ticketId}`, 'Dodaj notatkę', ButtonStyle.Success),
+    przycisk(`ticket:notatki:${ticketId}`, 'Odśwież', ButtonStyle.Secondary)
   ));
   return { components: [c], ...FLAGS_V2 };
 }
@@ -412,7 +452,7 @@ module.exports = {
   FLAGS_V2,
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
-  panelWeryfikacji, panelTicketow, kartaTicketu, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
+  panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
   kartaPanstwa,
   kartaListuGonczego, kartaZgloszeniaListu,
   kartaSprawy, kartaWyroku,

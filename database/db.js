@@ -19,5 +19,8 @@ function dodajKolumne(tabela, kolumna, definicja) {
 
 dodajKolumne('tickety', 'zamknal', 'TEXT');
 dodajKolumne('tickety', 'wyjasnienie', 'TEXT');
+dodajKolumne('tickety', 'temat', 'TEXT');
+dodajKolumne('tickety', 'opis', 'TEXT');
+dodajKolumne('tickety', 'wiadomosc_id', 'TEXT');
 
 module.exports = db;

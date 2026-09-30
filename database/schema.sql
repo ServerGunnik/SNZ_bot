@@ -18,9 +18,23 @@ CREATE TABLE IF NOT EXISTS tickety (
   zamkniety INTEGER,
   zamknal TEXT,
   wyjasnienie TEXT,
+  temat TEXT,
+  opis TEXT,
+  wiadomosc_id TEXT,
   ocena INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tickety_user ON tickety(user_id, status);
+
+-- Notatki staffu w ticketach (niewidoczne dla gracza)
+CREATE TABLE IF NOT EXISTS tickety_notatki (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  autor_id TEXT NOT NULL,
+  tresc TEXT NOT NULL,
+  data INTEGER NOT NULL,
+  FOREIGN KEY(ticket_id) REFERENCES tickety(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tickety_notatki ON tickety_notatki(ticket_id);
 
 -- SELFROLE
 CREATE TABLE IF NOT EXISTS selfrole_grupy (
