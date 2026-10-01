@@ -22,6 +22,8 @@ dodajKolumne('tickety', 'wyjasnienie', 'TEXT');
 dodajKolumne('tickety', 'temat', 'TEXT');
 dodajKolumne('tickety', 'opis', 'TEXT');
 dodajKolumne('tickety', 'wiadomosc_id', 'TEXT');
+for (const k of ['kategoria_kod', 'formularz', 'wynik', 'historia_kanal_id', 'historia_wiad_id']) dodajKolumne('tickety', k, 'TEXT');
+dodajKolumne('tickety', 'list_id', 'INTEGER');
 dodajKolumne('panstwa', 'sojusznik', 'INTEGER NOT NULL DEFAULT 1');
 dodajKolumne('panstwa_czlonkowie', 'status', "TEXT NOT NULL DEFAULT 'czlonek'");
 

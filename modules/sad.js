@@ -231,7 +231,8 @@ async function onWyrokModal(interaction) {
       Date.now()
     );
     const { opublikujList } = require('./listy-goncze.js');
-    await opublikujList(interaction.client, info.lastInsertRowid);
+    const blad = await opublikujList(interaction.client, info.lastInsertRowid);
+    if (blad) console.warn(`[sad] list gończy #${info.lastInsertRowid} nieopublikowany: ${blad}`);
   }
 
   await aktualizujKarteSprawy(interaction.client, id);

@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS tickety (
   temat TEXT,
   opis TEXT,
   wiadomosc_id TEXT,
+  kategoria_kod TEXT,
+  formularz TEXT, -- JSON: [{ id, label, wartosc }]
+  wynik TEXT,     -- udane | nieudane | odrzucone
+  historia_kanal_id TEXT,
+  historia_wiad_id TEXT,
+  list_id INTEGER,
   ocena INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tickety_user ON tickety(user_id, status);

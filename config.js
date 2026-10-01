@@ -8,6 +8,8 @@ module.exports = {
   kanaly: {
     logi: process.env.KANAL_LOGI,
     logiTickety: process.env.KANAL_LOGI_TICKETY || process.env.KANAL_LOGI,
+    // Historia zamkniętych ticketów (podsumowanie + transkrypt) - osobny kanał niż logi
+    historiaTicketow: process.env.KANAL_HISTORIA_TICKETOW,
     logiSad: process.env.KANAL_LOGI_SAD || process.env.KANAL_LOGI,
     logiPanstwa: process.env.KANAL_LOGI_PANSTWA || process.env.KANAL_LOGI,
     logiAntynuke: process.env.KANAL_LOGI_ANTYNUKE || process.env.KANAL_LOGI,
@@ -39,12 +41,52 @@ module.exports = {
 
   tickety: {
     limitOtwartych: 2,
+    // Kategorie ticketów. Każda ma własny formularz (max 5 pól) wypełniany PRZED otwarciem ticketu.
+    // styl: 'krotki' | 'dlugi'; nick: true = walidacja nicku Minecraft + podgląd państwa i listów gończych
     kategorie: [
-      { value: 'ogolne', label: 'Sprawa ogólna', emoji: 'gornik', opis: 'Pytania i sprawy ogólne' },
-      { value: 'zgloszenie', label: 'Zgłoszenie gracza', emoji: 'siekierka', opis: 'Zgłoś łamanie regulaminu' },
-      { value: 'wsparcie', label: 'Wsparcie techniczne', emoji: 'skrzynia', opis: 'Problemy techniczne' },
-      { value: 'wspolpraca', label: 'Współpraca', emoji: 'skrzynia', opis: 'Propozycje i partnerstwa' },
+      {
+        value: 'ranga', label: 'Prośba o rangę', emoji: '⭐', opis: 'Złóż podanie o rangę na serwerze',
+        pola: [
+          { id: 'nick', label: 'Twój nick w Minecraft', styl: 'krotki', min: 3, max: 16, nick: true },
+          { id: 'ranga', label: 'O jaką rangę prosisz?', styl: 'krotki', min: 2, max: 100 },
+          { id: 'uzasadnienie', label: 'Dlaczego mamy Ci ją przyznać?', styl: 'dlugi', min: 10, max: 1000 },
+        ],
+      },
+      {
+        value: 'pomoc', label: 'Pomoc ogólna', emoji: '❓', opis: 'Pytania, problemy i sprawy ogólne',
+        pola: [
+          { id: 'nick', label: 'Twój nick w Minecraft', styl: 'krotki', min: 3, max: 16, nick: true },
+          { id: 'temat', label: 'Temat', styl: 'krotki', min: 3, max: 100 },
+          { id: 'opis', label: 'Opisz, w czym potrzebujesz pomocy', styl: 'dlugi', min: 10, max: 1500 },
+        ],
+      },
+      {
+        value: 'szpieg', label: 'Zgłoszenie szpiega', emoji: '🔍', opis: 'Zgłoś gracza, który szpieguje dla wroga',
+        pola: [
+          { id: 'nick', label: 'Nick szpiega', styl: 'krotki', min: 3, max: 16, nick: true },
+          { id: 'dla_kogo', label: 'Dla kogo szpieguje? (państwo/gracz)', styl: 'krotki', max: 100, wymagane: false },
+          { id: 'opis', label: 'Co zauważyłeś?', styl: 'dlugi', min: 10, max: 1500 },
+          { id: 'dowody', label: 'Dowody (linki do screenów/nagrań)', styl: 'dlugi', max: 1000, wymagane: false },
+        ],
+      },
+      {
+        value: 'list-gonczy', label: 'Wystawienie listu gończego', emoji: '🎯', opis: 'Poproś o list gończy na gracza',
+        pola: [
+          { id: 'nick', label: 'Nick poszukiwanego', styl: 'krotki', min: 3, max: 16, nick: true },
+          { id: 'powod', label: 'Powód listu gończego', styl: 'dlugi', min: 10, max: 500 },
+          { id: 'nagroda', label: 'Nagroda (np. 10 diamentów)', styl: 'krotki', max: 100, wymagane: false },
+          { id: 'dowody', label: 'Dowody (linki do screenów/nagrań)', styl: 'dlugi', max: 1000, wymagane: false },
+        ],
+        // Staff może wystawić list gończy jednym przyciskiem z danych formularza
+        listGonczy: { nick: 'nick', powod: 'powod', nagroda: 'nagroda' },
+      },
     ],
+    // Wynik wybierany przy zamykaniu ticketu
+    wyniki: {
+      udane: { label: 'Udane / rozwiązane', emoji: '✅' },
+      nieudane: { label: 'Nieudane / nierozwiązane', emoji: '❌' },
+      odrzucone: { label: 'Odrzucone', emoji: '🚫' },
+    },
     ocenaTimeoutMs: 15 * 60 * 1000,
     minDlugoscWyjasnienia: 10,
   },

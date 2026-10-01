@@ -62,6 +62,20 @@ function skladPanstwa(panstwo) {
   return sklad.sort((a, b) => KOLEJNOSC_STATUSOW[a.status] - KOLEJNOSC_STATUSOW[b.status]);
 }
 
+// Do jakiego państwa należy nick (członek lub król) - null, jeśli do żadnego
+function gdzieNalezy(nick) {
+  const czlonek = q.czlonekPoNicku.get(nick);
+  if (czlonek) {
+    const panstwo = panstwoPoId(czlonek.panstwo_id);
+    const krol = panstwo && nickKrola(panstwo);
+    const status = krol && krol.toLowerCase() === nick.toLowerCase() ? 'krol'
+      : STATUSY_CZLONKOW.includes(czlonek.status) ? czlonek.status : 'czlonek';
+    return panstwo ? { panstwo, status } : null;
+  }
+  const panstwo = wszystkiePanstwa().find(p => nickKrola(p)?.toLowerCase() === nick.toLowerCase());
+  return panstwo ? { panstwo, status: 'krol' } : null;
+}
+
 // Config dla moda: [{ nick, allay, status, kingdom }]
 function configSojuszu() {
   const wpisy = [];
@@ -288,5 +302,5 @@ function rejestruj({ zarejestruj }) {
 
 module.exports = {
   rejestruj, pokazPanstwo, panstwoLidera, panstwoPoId,
-  wszystkiePanstwa, nickKrola, skladPanstwa, configSojuszu,
+  wszystkiePanstwa, nickKrola, skladPanstwa, configSojuszu, gdzieNalezy,
 };
