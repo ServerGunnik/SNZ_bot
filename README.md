@@ -50,7 +50,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 
 ### Liderzy (rola „Lider")
 - `/sojusz` — panel państwa dla króla (dodaj/usuń nick, zmień status Zastępca/Członek, paginacja). Tylko król może zarządzać składem.
-- `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff).
+- `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff); `waznosc-dni: 0` = bez limitu czasu. Na karcie listu: **Dołóż nagrodę** (każdy) i **Edytuj** (wystawca/staff — powód, nagroda, ważność, 0 = bez limitu).
 - `/pozew` — pozew do Sądu Sojuszniczego.
 
 ### Wszyscy
@@ -61,7 +61,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 ## Moduły
 
 - **Weryfikacja**: przycisk → modal z nickiem MC → walidacja + unikalność → rola + nick.
-- **Tickety**: kategorie **Prośba o rangę / Pomoc ogólna / Zgłoszenie szpiega / Wystawienie listu gończego** (w `config.js` → `tickety.kategorie`). Przed otwarciem kanału gracz wypełnia formularz danej kategorii (nick, powód, dowody…), który jest pokazany na karcie ticketu razem z podglądem, do jakiego państwa należy podany nick i czy ma aktywny list gończy. Pod kartą **🔒 Panel staffu** z notatkami widocznymi tylko dla administracji. W kategorii listu gończego staff wystawia list jednym przyciskiem. Zamyka wyłącznie administracja: wybiera wynik (**udane / nieudane / odrzucone**) i wpisuje wyjaśnienie, które trafia do gracza (DM + ocena 1–5). Każdy zamknięty ticket ląduje na kanale **historii** (`KANAL_HISTORIA_TICKETOW`, osobnym od logów) z formularzem, wynikiem, oceną i transkryptem; zdarzenia (otwarcie, przejęcie, zamknięcie) idą do logów. `/historia-ticketow` pokazuje zgłoszenia gracza.
+- **Tickety**: kategorie **Prośba o rangę / Pomoc ogólna / Zgłoszenie szpiega / Wystawienie listu gończego** (w `config.js` → `tickety.kategorie`). Przed otwarciem kanału gracz wypełnia formularz danej kategorii (nick, powód, dowody…), który jest pokazany na karcie ticketu razem z podglądem, do jakiego państwa należy podany nick i czy ma aktywny list gończy. Pod kartą **🔒 Panel staffu** z notatkami widocznymi tylko dla administracji, a razem z ticketem powstaje kanał narady `sprawa-<nick>-<id>-administracja` widoczny tylko dla staffu (usuwany przy zamknięciu, rozmowa trafia do historii). Ticket można przejąć tylko raz (przycisk się blokuje, gracz dostaje informację). Maksymalnie 2 otwarte tickety na osobę; panel resetuje wybór po utworzeniu ticketu. W kategorii listu gończego staff wystawia list jednym przyciskiem. Zamyka wyłącznie administracja: wybiera wynik (**udane / nieudane / odrzucone**) i wpisuje wyjaśnienie, które trafia do gracza (DM + ocena 1–5). Każdy zamknięty ticket ląduje na kanale **historii** (`KANAL_HISTORIA_TICKETOW`, osobnym od logów) z formularzem, wynikiem, oceną i transkryptem; zdarzenia (otwarcie, przejęcie, zamknięcie) idą do logów. `/historia-ticketow` pokazuje zgłoszenia gracza.
 - **Selfrole**: grupy w bazie, tryb single/multi, panel wystawiany na dowolnym kanale.
 - **Wołanie moderatora**: wejście na „Poczekalnię" pinguje staff, po przyjęciu bot przenosi wołającego i staffa na wolny kanał Pomoc 1-3, log czasu oczekiwania, cykliczne przypomnienia.
 - **Państwa + `/sojusz`**: staff tworzy państwo i nadaje lidera (króla, rola automatyczna). Tylko król zarządza swoim państwem (dodaj/usuń, statusy), gracz może należeć tylko do jednego państwa, limit członków. Status **Król** ma zawsze lider (jego nick z weryfikacji), pozostali to **Zastępca** lub **Członek**.
@@ -72,6 +72,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
   Nazwy statusów i nazwa pliku są w `config.js` → `panstwa`.
 - **Listy gończe**: głowa skina z `mc-heads.net`, statusy `oczekuje/aktywny/zrealizowany/wygasly/odrzucony`, zgłoszenia zatrzymania (modal z dowodem) rozpatrywane przez staff, wygasanie sprawdzane co godzinę.
 - **Sąd sojuszniczy**: `/pozew` tworzy prywatny kanał ze sprawą (numer `SNZ-YYYY-NNNN`), staff przyjmuje sprawę (max jedna aktywna na sędziego, blokada dla stron sprawy i poprzedniego sędziego przy odwołaniu), rola „Sędzia" nadawana/odbierana automatycznie, publikacja wyroku w kanale wyroków, opcjonalny automatyczny list gończy na skazanego, transkrypt po zamknięciu.
+- **Logi wiadomości**: usunięte i edytowane wiadomości (treść przed/po, załączniki, masowe usuwanie) na kanale `KANAL_LOGI_WIADOMOSCI` (domyślnie `KANAL_LOGI`). Logi nikogo nie pingują.
 - **Ostrzeżenia**: `/warn`, `/warny`, `/usun-warn`, konfigurowalne progi (auto-mute i auto-ban).
 - **Antynuke**: na podstawie dziennika zdarzeń wykrywa masowe banowanie, wyrzucanie, usuwanie i spamowanie kanałów oraz usuwanie ról (progi w `config.js` → `antynuke`). Sprawca spoza whitelisty traci role / jest wyrzucany / banowany (`ANTYNUKE_KARA`), a szkody są cofane: odbanowanie ofiar, odtworzenie usuniętych kanałów i ról, usunięcie spamowanych kanałów. Boty dodane przez osoby spoza whitelisty są wyrzucane.
 - **Anty-raid**: masowe wbijanie (domyślnie 8 dołączeń w 15 s) włącza tryb ochrony na 10 min — młode konta z fali i każdy kolejny nowy członek są wyrzucani (z DM). Ręcznie: `/antynuke raid`.

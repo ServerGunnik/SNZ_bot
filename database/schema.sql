@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tickety (
   historia_kanal_id TEXT,
   historia_wiad_id TEXT,
   list_id INTEGER,
+  narada_id TEXT, -- kanał narady administracji
   ocena INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tickety_user ON tickety(user_id, status);
@@ -102,6 +103,17 @@ CREATE TABLE IF NOT EXISTS listy_goncze (
 );
 CREATE INDEX IF NOT EXISTS idx_listy_nick ON listy_goncze(nick COLLATE NOCASE, status);
 CREATE INDEX IF NOT EXISTS idx_listy_status ON listy_goncze(status);
+
+-- Nagrody dokładane do listu gończego przez innych graczy
+CREATE TABLE IF NOT EXISTS listy_nagrody (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  list_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  nagroda TEXT NOT NULL,
+  data INTEGER NOT NULL,
+  FOREIGN KEY(list_id) REFERENCES listy_goncze(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_listy_nagrody ON listy_nagrody(list_id);
 
 CREATE TABLE IF NOT EXISTS listy_zgloszenia (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

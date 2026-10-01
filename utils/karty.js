@@ -153,7 +153,7 @@ function kartaTicketu({
   c.addTextDisplayComponents(tekst('-# Zgłoszenie zamyka administracja, podając wynik i wyjaśnienie.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
-    przycisk('ticket:przejmij', 'Przejmij', ButtonStyle.Primary),
+    przycisk('ticket:przejmij', przydzielony ? 'Przejęte' : 'Przejmij', ButtonStyle.Primary, null, Boolean(przydzielony)),
     przycisk('ticket:zamknij', 'Zamknij zgłoszenie', ButtonStyle.Danger)
   ));
   const rowStaff = [przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')];
@@ -183,10 +183,10 @@ function listaNotatek(notatki, limitZnakow = 3000) {
   return linie.join('\n');
 }
 
-function kartaNotatekTicketu({ ticketId, notatki }) {
+function kartaNotatekTicketu({ ticketId, notatki, naradaId = null }) {
   const c = kontener(kolory.info);
   c.addTextDisplayComponents(tekst('## 🔒 Panel staffu — notatki'));
-  c.addTextDisplayComponents(tekst('-# Widoczne tylko dla administracji. Gracz nie widzi tych notatek.'));
+  c.addTextDisplayComponents(tekst(`-# Widoczne tylko dla administracji. Gracz nie widzi tych notatek.${naradaId ? ` Narada: <#${naradaId}>` : ''}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(notatki.length ? listaNotatek(notatki) : '_Brak notatek. Dodaj pierwszą przyciskiem poniżej._'));
   c.addSeparatorComponents(separator(false));
@@ -194,6 +194,26 @@ function kartaNotatekTicketu({ ticketId, notatki }) {
     przycisk(`ticket:notatka-dodaj:${ticketId}`, 'Dodaj notatkę', ButtonStyle.Success),
     przycisk(`ticket:notatki:${ticketId}`, 'Odśwież', ButtonStyle.Secondary)
   ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Pierwsza wiadomość na kanale narady administracji
+function kartaNarady({ ticketId, uzytkownik, kategoria, kanalTicketu, pola = [], informacje = [] }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst(`## 🔒 Narada administracji — ticket #${ticketId}`));
+  c.addTextDisplayComponents(tekst('-# Ten kanał widzi tylko administracja. Zostanie usunięty razem z ticketem, a rozmowa trafi do historii.'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**Kategoria:** ${kategoria}\n**Zgłaszający:** <@${uzytkownik}>\n**Kanał ticketu:** <#${kanalTicketu}>`
+  ));
+  if (pola.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`### Formularz\n${tekstFormularza(pola)}`.slice(0, 2500)));
+  }
+  if (informacje.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(informacje.join('\n')));
+  }
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -434,7 +454,7 @@ function kartaConfigu({ nazwaPliku, liczbaWpisow, podglad = null }) {
 
 // ---- List gończy -------------------------------------------------------
 
-function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null }) {
+function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null, nagrody = [] }) {
   const kolor = list.status === 'aktywny' ? kolory.ostrzezenie
     : list.status === 'zrealizowany' ? kolory.sukces
     : list.status === 'wygasly' ? kolory.neutralny
@@ -455,10 +475,19 @@ function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null }) {
     .addTextDisplayComponents(
       tekst(`**Poszukiwany:** \`${list.nick}\``),
       tekst(`**Powód:** ${list.powod}`),
-      tekst(`**Nagroda:** ${list.nagroda || 'brak'}`),
+      tekst(`**Nagroda:** ${list.nagroda || (nagrody.length ? '—' : 'brak')}`),
     )
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(glowaUrl));
   c.addSectionComponents(sec);
+
+  if (nagrody.length) {
+    const ostatnie = nagrody.slice(-10);
+    c.addTextDisplayComponents(tekst(
+      `**Dołożone nagrody (${nagrody.length}):**\n` +
+      (nagrody.length > ostatnie.length ? `-# …oraz ${nagrody.length - ostatnie.length} wcześniejszych\n` : '') +
+      ostatnie.map(n => `• ${n.nagroda} — <@${n.user_id}>`).join('\n')
+    ));
+  }
 
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
@@ -470,6 +499,8 @@ function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null }) {
     c.addSeparatorComponents(separator(false));
     c.addActionRowComponents(new ActionRowBuilder().addComponents(
       przycisk(`list:zglos:${list.id}`, 'Zgłoś zatrzymanie', ButtonStyle.Primary),
+      przycisk(`list:nagroda:${list.id}`, 'Dołóż nagrodę', ButtonStyle.Success, '💰'),
+      przycisk(`list:edytuj:${list.id}`, 'Edytuj', ButtonStyle.Secondary, '✏️'),
       przycisk(`list:zamknij:${list.id}`, 'Zamknij list', ButtonStyle.Danger),
     ));
   }
@@ -645,7 +676,7 @@ module.exports = {
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
   panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
-  kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku,
+  kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku, kartaNarady,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
   kartaListuGonczego, kartaZgloszeniaListu,
   kartaSprawy, kartaWyroku,

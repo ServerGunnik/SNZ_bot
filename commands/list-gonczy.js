@@ -21,7 +21,7 @@ module.exports = {
     .addStringOption(o => o.setName('nick').setDescription('Nick poszukiwanego').setRequired(true))
     .addStringOption(o => o.setName('powod').setDescription('Powód').setRequired(true))
     .addStringOption(o => o.setName('nagroda').setDescription('Nagroda (np. 5 diamentów)'))
-    .addIntegerOption(o => o.setName('waznosc-dni').setDescription('Ważność w dniach').setMinValue(1).setMaxValue(365)),
+    .addIntegerOption(o => o.setName('waznosc-dni').setDescription('Ważność w dniach (0 = bez limitu czasu)').setMinValue(0).setMaxValue(365)),
 
   async execute(interaction) {
     const czyStaff = jestStaff(interaction.member);
@@ -41,8 +41,9 @@ module.exports = {
     }
     const powod = interaction.options.getString('powod');
     const nagroda = interaction.options.getString('nagroda') || null;
-    const dni = interaction.options.getInteger('waznosc-dni') || config.listyGoncze.domyslnaWaznoscDni;
-    const wygasa = Date.now() + dni * 24 * 60 * 60 * 1000;
+    const dni = interaction.options.getInteger('waznosc-dni') ?? config.listyGoncze.domyslnaWaznoscDni;
+    // 0 = list bezterminowy
+    const wygasa = dni === 0 ? null : Date.now() + dni * 24 * 60 * 60 * 1000;
 
     const panstwoLidera = q.panstwoLidera.get(interaction.user.id);
     const status = czyStaff ? 'aktywny' : 'oczekuje';

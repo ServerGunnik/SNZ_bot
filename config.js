@@ -10,6 +10,10 @@ module.exports = {
     logiTickety: process.env.KANAL_LOGI_TICKETY || process.env.KANAL_LOGI,
     // Historia zamkniętych ticketów (podsumowanie + transkrypt) - osobny kanał niż logi
     historiaTicketow: process.env.KANAL_HISTORIA_TICKETOW,
+    // Logi usuniętych i edytowanych wiadomości
+    logiWiadomosci: process.env.KANAL_LOGI_WIADOMOSCI || process.env.KANAL_LOGI,
+    // Kategoria dla kanałów narady administracji (domyślnie ta sama co tickety)
+    kategoriaNarady: process.env.KATEGORIA_NARADY || process.env.KATEGORIA_TICKETY,
     logiSad: process.env.KANAL_LOGI_SAD || process.env.KANAL_LOGI,
     logiPanstwa: process.env.KANAL_LOGI_PANSTWA || process.env.KANAL_LOGI,
     logiAntynuke: process.env.KANAL_LOGI_ANTYNUKE || process.env.KANAL_LOGI,

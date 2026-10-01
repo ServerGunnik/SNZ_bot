@@ -92,6 +92,8 @@ module.exports = {
       parent: kategoria,
       permissionOverwrites: [
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+        // Bot musi widzieć kanał, który tworzy (gdy nie ma uprawnień administratora)
+        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels] },
         { id: interaction.user.id, allow: dostepStrony },
         ...(pozwanyNaSerwerze && pozwanyId !== interaction.user.id ? [{ id: pozwanyId, allow: dostepStrony }] : []),
         ...(staff ? [{ id: staff, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }] : []),
