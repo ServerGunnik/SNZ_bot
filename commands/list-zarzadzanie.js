@@ -59,7 +59,7 @@ module.exports = {
       });
       const waznoscMs = list.wygasa ? list.wygasa - list.utworzony : null;
       q.zatwierdz.run(waznoscMs ? Date.now() + waznoscMs : null, id);
-      await opublikujList(interaction.client, id);
+      const blad = await opublikujList(interaction.client, id);
       await powiadomWystawce(interaction.client, list,
         karty.kartaSukces('List gończy zatwierdzony', `Twój list **#${id}** na \`${list.nick}\` został opublikowany.`));
       await log(interaction.client, {
@@ -68,7 +68,9 @@ module.exports = {
         kolor: kolory.sukces,
       });
       return interaction.reply({
-        ...karty.kartaSukces('Zatwierdzony', `List **#${id}** został opublikowany.`),
+        ...(blad
+          ? karty.kartaOstrzezenie('Zatwierdzony, ale nieopublikowany', `List **#${id}** jest aktywny, ale nie trafił na kanał: ${blad}.`)
+          : karty.kartaSukces('Zatwierdzony', `List **#${id}** został opublikowany.`)),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
     }

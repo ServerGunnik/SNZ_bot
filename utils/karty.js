@@ -103,43 +103,66 @@ function panelTicketow(kategorie) {
   c.addTextDisplayComponents(tekst('## Biuro zgłoszeń SNZ'));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
-    'Wybierz kategorię, aby otworzyć prywatny kanał obsługi. Staff odpowie w możliwie krótkim terminie.\n\n' +
-    kategorie.map(k => `• **${k.label}** — ${k.opis}`).join('\n')
+    'Wybierz kategorię i wypełnij krótki formularz — dopiero wtedy otworzy się prywatny kanał obsługi.\n\n' +
+    kategorie.map(k => `${k.emoji ? `${k.emoji} ` : '• '}**${k.label}** — ${k.opis}`).join('\n')
   ));
   c.addSeparatorComponents(separator(false));
   const select = new StringSelectMenuBuilder()
     .setCustomId('ticket:kategoria')
     .setPlaceholder('Wybierz kategorię zgłoszenia')
-    .addOptions(kategorie.map(k => new StringSelectMenuOptionBuilder()
-      .setLabel(k.label).setValue(k.value).setDescription(k.opis.slice(0, 100))));
+    .addOptions(kategorie.map(k => {
+      const o = new StringSelectMenuOptionBuilder().setLabel(k.label).setValue(k.value).setDescription(k.opis.slice(0, 100));
+      if (k.emoji) o.setEmoji(k.emoji);
+      return o;
+    }));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(select));
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaTicketu({ ticketId = null, uzytkownik, kategoria, przydzielony = null, temat = null, opis = null }) {
+// Pola formularza: [{ label, wartosc }] -> tekst
+function tekstFormularza(pola) {
+  return pola
+    .filter(p => p.wartosc)
+    .map(p => p.wartosc.includes('\n') || p.wartosc.length > 80 ? `**${p.label}:**\n${p.wartosc}` : `**${p.label}:** ${p.wartosc}`)
+    .join('\n');
+}
+
+function kartaTicketu({
+  ticketId = null, uzytkownik, kategoria, przydzielony = null,
+  pola = [], informacje = [], listGonczy = null, temat = null, opis = null,
+}) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst(`## Zgłoszenie — ${kategoria}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Zgłaszający:** <@${uzytkownik}>\n` +
-    `**Kategoria:** ${kategoria}\n` +
     `**Obsługuje:** ${przydzielony ? `<@${przydzielony}>` : 'nikt jeszcze'}`
   ));
   c.addSeparatorComponents(separator(true));
-  if (temat || opis) {
+  if (pola.length) {
+    c.addTextDisplayComponents(tekst(`### Formularz\n${tekstFormularza(pola)}`));
+  } else if (temat || opis) {
     c.addTextDisplayComponents(tekst(`### ${temat || 'Opis sprawy'}\n${opis || ''}`));
   } else {
     c.addTextDisplayComponents(tekst('Opisz sprawę w kilku zdaniach. Staff wkrótce się zajmie zgłoszeniem.'));
   }
-  c.addTextDisplayComponents(tekst('-# Zgłoszenie zamyka administracja po wpisaniu wyjaśnienia, jak sprawa została rozwiązana.'));
+  if (informacje.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(informacje.join('\n')));
+  }
+  c.addTextDisplayComponents(tekst('-# Zgłoszenie zamyka administracja, podając wynik i wyjaśnienie.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
     przycisk('ticket:przejmij', 'Przejmij', ButtonStyle.Primary),
     przycisk('ticket:zamknij', 'Zamknij zgłoszenie', ButtonStyle.Danger)
   ));
-  c.addActionRowComponents(new ActionRowBuilder().addComponents(
-    przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')
-  ));
+  const rowStaff = [przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')];
+  if (listGonczy && ticketId) {
+    rowStaff.push(listGonczy.id
+      ? przycisk(`ticket:list-wystawiony:${ticketId}`, `List gończy #${listGonczy.id} wystawiony`, ButtonStyle.Success, '🎯', true)
+      : przycisk(`ticket:wystaw-list:${ticketId}`, 'Wystaw list gończy', ButtonStyle.Success, '🎯'));
+  }
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(...rowStaff));
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -174,23 +197,47 @@ function kartaNotatekTicketu({ ticketId, notatki }) {
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaWyjasnieniaTicketu({ zamykajacy, wyjasnienie }) {
-  const c = kontener(kolory.info);
-  c.addTextDisplayComponents(tekst('## Wyjaśnienie zgłoszenia'));
+// Krok 1 zamykania: wybór wyniku
+function kartaWynikuTicketu(ticketId, wyniki) {
+  const c = kontener(kolory.ostrzezenie);
+  c.addTextDisplayComponents(tekst('## Zamknięcie zgłoszenia'));
   c.addSeparatorComponents(separator(true));
-  c.addTextDisplayComponents(tekst(`${wyjasnienie}\n\n**Zamyka:** <@${zamykajacy}>`));
+  c.addTextDisplayComponents(tekst('Jaki jest wynik zgłoszenia? W następnym kroku wpiszesz wyjaśnienie — trafi do gracza i do historii ticketów.'));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    ...Object.entries(wyniki).map(([kod, w]) => przycisk(
+      `ticket:wynik:${ticketId}:${kod}`, w.label,
+      kod === 'udane' ? ButtonStyle.Success : kod === 'odrzucone' ? ButtonStyle.Danger : ButtonStyle.Secondary,
+      w.emoji,
+    ))
+  ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kolorWyniku(kod) {
+  return kod === 'udane' ? kolory.sukces : kod === 'odrzucone' ? kolory.blad : kolory.ostrzezenie;
+}
+
+function kartaWyjasnieniaTicketu({ zamykajacy, wyjasnienie, wynik = null, wynikKod = null }) {
+  const c = kontener(wynikKod ? kolorWyniku(wynikKod) : kolory.info);
+  c.addTextDisplayComponents(tekst('## Zgłoszenie zamknięte'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    (wynik ? `**Wynik:** ${wynik.emoji} ${wynik.label}\n` : '') +
+    `**Wyjaśnienie:**\n${wyjasnienie}\n\n**Zamyka:** <@${zamykajacy}>`
+  ));
   c.addTextDisplayComponents(tekst('-# Kanał zostanie usunięty za 5 sekund.'));
   return { components: [c], ...FLAGS_V2 };
 }
 
-function kartaOcenyTicketu(ticketId, wyjasnienie = null) {
+function kartaOcenyTicketu(ticketId, wyjasnienie = null, wynik = null) {
   const c = kontener(kolory.neutralny);
   c.addTextDisplayComponents(tekst('## Oceń obsługę zgłoszenia'));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst('Twoje zgłoszenie zostało zamknięte. Wystaw ocenę od 1 do 5 — pomoże nam to podnosić jakość obsługi.'));
   if (wyjasnienie) {
     c.addSeparatorComponents(separator(true));
-    c.addTextDisplayComponents(tekst(`**Wyjaśnienie:**\n${wyjasnienie}`));
+    c.addTextDisplayComponents(tekst((wynik ? `**Wynik:** ${wynik.emoji} ${wynik.label}\n` : '') + `**Wyjaśnienie:**\n${wyjasnienie}`));
   }
   c.addSeparatorComponents(separator(false));
   const row = new ActionRowBuilder();
@@ -198,6 +245,62 @@ function kartaOcenyTicketu(ticketId, wyjasnienie = null) {
     row.addComponents(przycisk(`ticket:ocena:${ticketId}:${i}`, `${i}`, ButtonStyle.Secondary));
   }
   c.addActionRowComponents(row);
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Wpis na kanale historii ticketów (edytowany, gdy gracz wystawi ocenę)
+function kartaHistoriiTicketu({ ticket, kategoria, pola, wynik, liczbaNotatek = 0 }) {
+  const c = kontener(kolorWyniku(ticket.wynik));
+  const czasMin = ticket.zamkniety ? Math.max(1, Math.round((ticket.zamkniety - ticket.otwarty) / 60000)) : null;
+  const czas = czasMin === null ? '—' : czasMin >= 60 ? `${Math.floor(czasMin / 60)} h ${czasMin % 60} min` : `${czasMin} min`;
+  c.addTextDisplayComponents(tekst(`## Ticket #${ticket.id} — ${kategoria}`));
+  c.addTextDisplayComponents(tekst(`-# ${wynik ? `${wynik.emoji} ${wynik.label}` : 'Zamknięty'} • czas obsługi: ${czas}`));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**Zgłaszający:** <@${ticket.user_id}>\n` +
+    `**Obsługiwał:** ${ticket.przydzielony ? `<@${ticket.przydzielony}>` : '_nikt_'}\n` +
+    `**Zamknął:** ${ticket.zamknal ? `<@${ticket.zamknal}>` : '—'}\n` +
+    `**Otwarty:** <t:${Math.floor(ticket.otwarty / 1000)}:f>\n` +
+    `**Zamknięty:** ${ticket.zamkniety ? `<t:${Math.floor(ticket.zamkniety / 1000)}:f>` : '—'}` +
+    (ticket.list_id ? `\n**Wystawiony list gończy:** #${ticket.list_id}` : '')
+  ));
+  if (pola.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`### Formularz\n${tekstFormularza(pola)}`.slice(0, 1800)));
+  }
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(`### Wyjaśnienie\n${ticket.wyjasnienie || '_brak_'}`));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**Ocena gracza:** ${ticket.ocena ? `${'★'.repeat(ticket.ocena)}${'☆'.repeat(5 - ticket.ocena)} (${ticket.ocena}/5)` : '_jeszcze nie oceniono_'}` +
+    (liczbaNotatek ? `\n**Notatki staffu:** ${liczbaNotatek} (w transkrypcie)` : '')
+  ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaPliku({ tytul, nazwaPliku }) {
+  const c = kontener(kolory.neutralny);
+  c.addTextDisplayComponents(tekst(`-# ${tytul}`));
+  c.addFileComponents(new FileBuilder().setURL(`attachment://${nazwaPliku}`));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaHistoriiUzytkownika({ userId, tickety, total, nazwyKategorii, wyniki }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst(`## Historia ticketów — <@${userId}>`));
+  c.addTextDisplayComponents(tekst(`-# Wszystkich zgłoszeń: ${total}${total > tickety.length ? ` • pokazano ${tickety.length} najnowszych` : ''}`));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(tickety.length
+    ? tickety.map(t => {
+        const w = wyniki[t.wynik];
+        const status = t.status === 'otwarty' ? '🟢 otwarty' : w ? `${w.emoji} ${w.label}` : 'zamknięty';
+        const link = t.historia_wiad_id && t.historia_kanal_id && t.guild_id
+          ? ` — [historia](https://discord.com/channels/${t.guild_id}/${t.historia_kanal_id}/${t.historia_wiad_id})` : '';
+        const kanal = t.status === 'otwarty' ? ` — <#${t.kanal_id}>` : '';
+        return `\`#${t.id}\` <t:${Math.floor(t.otwarty / 1000)}:d> • **${nazwyKategorii[t.kategoria_kod] || t.kategoria}** • ${status}` +
+          `${t.ocena ? ` • ${t.ocena}/5` : ''}${kanal}${link}`;
+      }).join('\n')
+    : '_Brak zgłoszeń._'));
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -542,6 +645,7 @@ module.exports = {
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
   panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
+  kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
   kartaListuGonczego, kartaZgloszeniaListu,
   kartaSprawy, kartaWyroku,

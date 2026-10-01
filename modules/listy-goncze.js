@@ -15,6 +15,8 @@ const q = {
   aktualizujStatus: db.prepare('UPDATE listy_goncze SET status = ?, zamkniety = ?, zamkniety_przez = ? WHERE id = ?'),
   aktywneOWygasajaceDo: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' AND wygasa IS NOT NULL AND wygasa <= ?"),
   panstwoId: db.prepare('SELECT * FROM panstwa WHERE id = ?'),
+  utworz: db.prepare('INSERT INTO listy_goncze (nick, powod, nagroda, wystawca_id, wystawca_panstwo_id, status, wygasa, utworzony) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+  aktywnyNaNick: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' AND nick = ? COLLATE NOCASE ORDER BY id DESC LIMIT 1"),
   wstawZgloszenie: db.prepare('INSERT INTO listy_zgloszenia (list_id, zglaszajacy_id, dowod, utworzone) VALUES (?, ?, ?, ?)'),
   zgloszenie: db.prepare('SELECT * FROM listy_zgloszenia WHERE id = ?'),
   aktualizujZgloszenie: db.prepare("UPDATE listy_zgloszenia SET status = ?, rozpatrzone = ?, rozpatrzyl = ? WHERE id = ?"),
@@ -29,13 +31,17 @@ function kartaListuDoWiadomosci(list) {
   });
 }
 
+// Zwraca null przy sukcesie albo opis problemu (żeby nie raportować fałszywego "opublikowano")
 async function opublikujList(client, id) {
   const list = q.poId.get(id);
-  if (!list) return;
+  if (!list) return 'list nie istnieje';
+  if (!config.kanaly.listyGoncze) return 'brak KANAL_LISTY_GONCZE w .env';
   const kanal = await client.channels.fetch(config.kanaly.listyGoncze).catch(() => null);
-  if (!kanal) return;
-  const wiad = await kanal.send(kartaListuDoWiadomosci(list));
+  if (!kanal) return 'kanał listów gończych nie istnieje lub bot go nie widzi';
+  const wiad = await kanal.send(kartaListuDoWiadomosci(list)).catch(() => null);
+  if (!wiad) return 'bot nie może pisać na kanale listów gończych';
   q.zapiszWiad.run(wiad.id, kanal.id, id);
+  return null;
 }
 
 async function aktualizujWiadomosc(client, id) {
@@ -56,6 +62,16 @@ async function zamknijList(client, id, status, przezUserId) {
     opis: `**#${id}** — status: **${status}**\n**Zamknął:** <@${przezUserId}>`,
     kolor: kolory.info,
   });
+}
+
+function utworzList({ nick, powod, nagroda = null, wystawcaId, panstwoId = null, status = 'aktywny', waznoscDni = config.listyGoncze.domyslnaWaznoscDni }) {
+  const teraz = Date.now();
+  const info = q.utworz.run(nick, powod.slice(0, 500), nagroda, wystawcaId, panstwoId, status, teraz + waznoscDni * 24 * 60 * 60 * 1000, teraz);
+  return info.lastInsertRowid;
+}
+
+function aktywnyListNaNick(nick) {
+  return q.aktywnyNaNick.get(nick);
 }
 
 // Handlery interakcji
@@ -164,6 +180,8 @@ function rejestruj({ zarejestruj }) {
 module.exports = {
   rejestruj,
   opublikujList,
+  utworzList,
+  aktywnyListNaNick,
   zamknijList,
   aktualizujWiadomosc,
   kartaListuDoWiadomosci,

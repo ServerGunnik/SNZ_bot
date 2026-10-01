@@ -54,9 +54,11 @@ module.exports = {
     const listId = info.lastInsertRowid;
 
     if (status === 'aktywny') {
-      await opublikujList(interaction.client, listId);
+      const blad = await opublikujList(interaction.client, listId);
       await interaction.reply({
-        ...karty.kartaSukces('List gończy opublikowany', `List **#${listId}** na \`${nick}\` jest już aktywny.`),
+        ...(blad
+          ? karty.kartaOstrzezenie('List aktywny, ale nieopublikowany', `List **#${listId}** na \`${nick}\` jest aktywny, ale nie trafił na kanał: ${blad}.`)
+          : karty.kartaSukces('List gończy opublikowany', `List **#${listId}** na \`${nick}\` jest już aktywny.`)),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
     } else {

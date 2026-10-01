@@ -44,6 +44,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 - `/list-gonczy-admin zatwierdz|odrzuc|zamknij` — zatwierdzanie i zamykanie listów.
 - `/sprawa-zamknij` — zamknięcie sprawy sądowej (z transkryptem).
 - `/warn`, `/warny`, `/usun-warn` — moderacja.
+- `/historia-ticketow <gracz>` — historia zgłoszeń gracza z linkami do wpisów w historii.
 - `/antynuke status|whitelist-lista|raid` — stan ochrony, whitelista, ręczny tryb anty-raid.
 - `/antynuke whitelist-dodaj|whitelist-usun` — tylko właściciel serwera.
 
@@ -60,7 +61,7 @@ Kompletny bot dla serwera Minecraft SNZ. Discord.js v14 + Components V2, SQLite 
 ## Moduły
 
 - **Weryfikacja**: przycisk → modal z nickiem MC → walidacja + unikalność → rola + nick.
-- **Tickety**: zamyka wyłącznie administracja, kategorie, **formularz przy otwieraniu (temat + opis — podsumowanie na karcie ticketu)**, **🔒 Panel staffu na dole karty — notatki administracji widoczne tylko dla staffu (gracz ich nie widzi), dołączane do logu i transkryptu po zamknięciu**, limit otwartych, przejmowanie przez staff, **zamknięcie wymaga wpisania wyjaśnienia** (jak rozwiązano sprawę — trafia do kanału, logu, transkryptu i DM autora), transkrypt po zamknięciu, ocena 1–5 w DM.
+- **Tickety**: kategorie **Prośba o rangę / Pomoc ogólna / Zgłoszenie szpiega / Wystawienie listu gończego** (w `config.js` → `tickety.kategorie`). Przed otwarciem kanału gracz wypełnia formularz danej kategorii (nick, powód, dowody…), który jest pokazany na karcie ticketu razem z podglądem, do jakiego państwa należy podany nick i czy ma aktywny list gończy. Pod kartą **🔒 Panel staffu** z notatkami widocznymi tylko dla administracji. W kategorii listu gończego staff wystawia list jednym przyciskiem. Zamyka wyłącznie administracja: wybiera wynik (**udane / nieudane / odrzucone**) i wpisuje wyjaśnienie, które trafia do gracza (DM + ocena 1–5). Każdy zamknięty ticket ląduje na kanale **historii** (`KANAL_HISTORIA_TICKETOW`, osobnym od logów) z formularzem, wynikiem, oceną i transkryptem; zdarzenia (otwarcie, przejęcie, zamknięcie) idą do logów. `/historia-ticketow` pokazuje zgłoszenia gracza.
 - **Selfrole**: grupy w bazie, tryb single/multi, panel wystawiany na dowolnym kanale.
 - **Wołanie moderatora**: wejście na „Poczekalnię" pinguje staff, po przyjęciu bot przenosi wołającego i staffa na wolny kanał Pomoc 1-3, log czasu oczekiwania, cykliczne przypomnienia.
 - **Państwa + `/sojusz`**: staff tworzy państwo i nadaje lidera (króla, rola automatyczna). Tylko król zarządza swoim państwem (dodaj/usuń, statusy), gracz może należeć tylko do jednego państwa, limit członków. Status **Król** ma zawsze lider (jego nick z weryfikacji), pozostali to **Zastępca** lub **Członek**.
