@@ -41,7 +41,8 @@ module.exports = {
         `**Antynuke:** ${s.antynuke ? 'włączony' : 'wyłączony'}\n` +
         `**Kara:** ${{ role: 'odebranie ról', kick: 'wyrzucenie', ban: 'ban' }[an.kara] || an.kara}\n` +
         `**Progi (w ${an.oknoMs / 1000}s):** bany ${an.progi.ban}, kicki ${an.progi.kick}, usunięte kanały ${an.progi.kanalUsun}, ` +
-        `nowe kanały ${an.progi.kanalUtworz}, usunięte role ${an.progi.rolaUsun}\n` +
+        `nowe kanały ${an.progi.kanalUtworz}, usunięte role ${an.progi.rolaUsun}, nadanie uprawnień admina ${an.progi.nadanieUprawnien} (zawsze cofane), ` +
+        `webhooki ${an.progi.webhook}, uprawnienia kanałów ${an.progi.uprawnieniaKanalow}, ustawienia serwera ${an.progi.serwer}\n` +
         `**Przywracanie szkód:** ${an.przywracaj ? 'tak' : 'nie'}\n` +
         `**Blokada obcych botów:** ${an.blokujBoty ? 'tak' : 'nie'}\n\n` +
         `**Anty-raid:** ${s.antyraid ? 'włączony' : 'wyłączony'} — próg ${ar.progDolaczen} dołączeń w ${ar.oknoMs / 1000}s\n` +

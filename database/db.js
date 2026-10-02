@@ -2,7 +2,8 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const dbPath = path.join(__dirname, 'snz.db');
+// SNZ_DB_PATH pozwala podmienić bazę (np. ':memory:' w testach)
+const dbPath = process.env.SNZ_DB_PATH || path.join(__dirname, 'snz.db');
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
@@ -25,7 +26,12 @@ dodajKolumne('tickety', 'wiadomosc_id', 'TEXT');
 for (const k of ['kategoria_kod', 'formularz', 'wynik', 'historia_kanal_id', 'historia_wiad_id']) dodajKolumne('tickety', k, 'TEXT');
 dodajKolumne('tickety', 'list_id', 'INTEGER');
 dodajKolumne('tickety', 'narada_id', 'TEXT');
+for (const k of ['ostatnia_aktywnosc', 'przypomniano', 'ostrzezono_nieaktywnosc']) dodajKolumne('tickety', k, 'INTEGER');
+dodajKolumne('mod_call', 'pomoc_kanal_id', 'TEXT');
+dodajKolumne('mod_call', 'sprzatniete', 'INTEGER DEFAULT 0');
 dodajKolumne('panstwa', 'sojusznik', 'INTEGER NOT NULL DEFAULT 1');
 dodajKolumne('panstwa_czlonkowie', 'status', "TEXT NOT NULL DEFAULT 'czlonek'");
+
+db.sciezka = dbPath;
 
 module.exports = db;

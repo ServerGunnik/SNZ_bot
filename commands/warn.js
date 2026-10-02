@@ -5,10 +5,11 @@ const karty = require('../utils/karty.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const { liczAktywne } = require('../modules/ostrzezenia.js');
 
 const q = {
   wstaw: db.prepare('INSERT INTO ostrzezenia (user_id, powod, wystawca_id, data) VALUES (?, ?, ?, ?)'),
-  licz: db.prepare('SELECT COUNT(*) c FROM ostrzezenia WHERE user_id = ?'),
+  wszystkie: db.prepare('SELECT COUNT(*) c FROM ostrzezenia WHERE user_id = ?'),
 };
 
 module.exports = {
@@ -30,7 +31,9 @@ module.exports = {
     const user = interaction.options.getUser('uzytkownik');
     const powod = interaction.options.getString('powod');
     const info = q.wstaw.run(user.id, powod, interaction.user.id, Date.now());
-    const suma = q.licz.get(user.id).c;
+    // Do progów liczą się tylko aktywne ostrzeżenia (niewygasłe, bez wyroków sądu - patrz config.ostrzezenia)
+    const suma = liczAktywne(user.id);
+    const wszystkie = q.wszystkie.get(user.id).c;
 
     // Progi
     let auto = '';
@@ -49,12 +52,12 @@ module.exports = {
 
     await log(interaction.client, {
       tytul: 'Wystawiono ostrzeżenie',
-      opis: `**Użytkownik:** <@${user.id}>\n**Powód:** ${powod}\n**Wystawca:** <@${interaction.user.id}>\n**Suma warnów:** ${suma}${auto}`,
+      opis: `**Użytkownik:** <@${user.id}>\n**Powód:** ${powod}\n**Wystawca:** <@${interaction.user.id}>\n**Aktywne warny:** ${suma} (wszystkich: ${wszystkie})${auto}`,
       kolor: kolory.ostrzezenie,
     });
 
     await interaction.reply({
-      ...karty.kartaSukces('Ostrzeżenie wystawione', `\`#${info.lastInsertRowid}\` dla <@${user.id}>. Suma: **${suma}**.${auto}`),
+      ...karty.kartaSukces('Ostrzeżenie wystawione', `\`#${info.lastInsertRowid}\` dla <@${user.id}>. Aktywnych: **${suma}** (wszystkich: ${wszystkie}).${auto}`),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   },

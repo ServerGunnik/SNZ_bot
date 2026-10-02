@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('disc
 const db = require('../database/db.js');
 const karty = require('../utils/karty.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
+const { powodBlokadyRoli, odswiezPanel } = require('../modules/selfrole.js');
 
 const q = {
   utworzGrupe: db.prepare('INSERT INTO selfrole_grupy (nazwa, opis, tryb) VALUES (?, ?, ?)'),
@@ -10,6 +11,7 @@ const q = {
   role: db.prepare('SELECT * FROM selfrole_role WHERE grupa_id = ? ORDER BY id'),
   dodajRole: db.prepare('INSERT INTO selfrole_role (grupa_id, role_id, etykieta, opis, emoji) VALUES (?, ?, ?, ?, ?)'),
   usunRole: db.prepare('DELETE FROM selfrole_role WHERE id = ?'),
+  wpisRoli: db.prepare('SELECT * FROM selfrole_role WHERE id = ?'),
   zapiszWiadomosc: db.prepare('UPDATE selfrole_grupy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   wszystkieGrupy: db.prepare('SELECT * FROM selfrole_grupy ORDER BY id'),
 };
@@ -68,7 +70,9 @@ module.exports = {
 
     if (sub === 'grupa-usun') {
       const id = interaction.options.getInteger('id');
+      const grupa = q.grupa.get(id);
       q.usunGrupe.run(id);
+      await odswiezPanel(interaction.client, grupa, true);
       return interaction.reply({
         ...karty.kartaSukces('Grupa usunięta', `Usunięto grupę **#${id}**.`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
@@ -101,10 +105,18 @@ module.exports = {
         });
       }
       const rola = interaction.options.getRole('rola');
+      const blokada = powodBlokadyRoli(interaction.guild.roles.cache.get(rola.id), interaction.guild);
+      if (blokada) {
+        return interaction.reply({
+          ...karty.kartaBlad('Tej roli nie można dodać', `<@&${rola.id}> — ${blokada}.`),
+          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+        });
+      }
       const etykieta = interaction.options.getString('etykieta');
       const opis = interaction.options.getString('opis') || null;
       const emoji = interaction.options.getString('emoji') || null;
       const info = q.dodajRole.run(grupa, rola.id, etykieta, opis, emoji);
+      await odswiezPanel(interaction.client, q.grupa.get(grupa));
       return interaction.reply({
         ...karty.kartaSukces('Rola dodana', `Dodano <@&${rola.id}> do grupy **#${grupa}** (wpis #${info.lastInsertRowid}).`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
@@ -113,7 +125,9 @@ module.exports = {
 
     if (sub === 'rola-usun') {
       const id = interaction.options.getInteger('id');
+      const wpis = q.wpisRoli.get(id);
       q.usunRole.run(id);
+      if (wpis) await odswiezPanel(interaction.client, q.grupa.get(wpis.grupa_id));
       return interaction.reply({
         ...karty.kartaSukces('Rola usunięta', `Usunięto wpis #${id}.`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,

@@ -21,6 +21,12 @@ const q = {
   nagrody: db.prepare('SELECT * FROM listy_nagrody WHERE list_id = ? ORDER BY id'),
   dodajNagrode: db.prepare('INSERT INTO listy_nagrody (list_id, user_id, nagroda, data) VALUES (?, ?, ?, ?)'),
   edytuj: db.prepare('UPDATE listy_goncze SET powod = ?, nagroda = ?, wygasa = ? WHERE id = ?'),
+  wgStatusu: {
+    aktywne: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' ORDER BY id DESC"),
+    oczekujace: db.prepare("SELECT * FROM listy_goncze WHERE status = 'oczekuje' ORDER BY id DESC"),
+    zakonczone: db.prepare("SELECT * FROM listy_goncze WHERE status IN ('zrealizowany', 'wygasly', 'odrzucony') ORDER BY id DESC LIMIT 200"),
+  },
+  liczbaNagrod: db.prepare('SELECT list_id, COUNT(*) c FROM listy_nagrody GROUP BY list_id'),
   aktywnyNaNick: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' AND nick = ? COLLATE NOCASE ORDER BY id DESC LIMIT 1"),
   wstawZgloszenie: db.prepare('INSERT INTO listy_zgloszenia (list_id, zglaszajacy_id, dowod, utworzone) VALUES (?, ?, ?, ?)'),
   zgloszenie: db.prepare('SELECT * FROM listy_zgloszenia WHERE id = ?'),
@@ -168,6 +174,36 @@ async function onZamknij(interaction) {
   });
 }
 
+// ---- Przegląd listów (/listy-goncze) -------------------------------------
+
+const LISTOW_NA_STRONE = 8;
+
+function widokListow(status, strona, { guildId, czyStaff }) {
+  // Oczekujące na zatwierdzenie widzi tylko administracja
+  if (!q.wgStatusu[status] || (status === 'oczekujace' && !czyStaff)) status = 'aktywne';
+  const listy = q.wgStatusu[status].all();
+  const nagrody = new Map(q.liczbaNagrod.all().map(r => [r.list_id, r.c]));
+  const stron = Math.max(1, Math.ceil(listy.length / LISTOW_NA_STRONE));
+  const s = Math.min(Math.max(1, strona), stron);
+  return karty.kartaListyListow({
+    status,
+    listy: listy.slice((s - 1) * LISTOW_NA_STRONE, s * LISTOW_NA_STRONE).map(l => ({ ...l, dolozone: nagrody.get(l.id) || 0 })),
+    total: listy.length,
+    strona: s,
+    stron,
+    guildId,
+    czyStaff,
+  });
+}
+
+async function onStronaListow(interaction) {
+  const [, , status, stronaStr] = interaction.customId.split(':');
+  await interaction.update(widokListow(status, parseInt(stronaStr, 10) || 1, {
+    guildId: interaction.guild.id,
+    czyStaff: jestStaff(interaction.member),
+  }));
+}
+
 // ---- Dokładanie nagród (każdy gracz) -----------------------------------
 
 async function onNagroda(interaction) {
@@ -294,6 +330,7 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('list:nagroda-modal', onNagrodaModal);
   zarejestruj('list:edytuj', onEdytuj);
   zarejestruj('list:edytuj-modal', onEdytujModal);
+  zarejestruj('listy:str', onStronaListow);
 }
 
 module.exports = {
@@ -301,6 +338,7 @@ module.exports = {
   opublikujList,
   utworzList,
   aktywnyListNaNick,
+  widokListow,
   zamknijList,
   aktualizujWiadomosc,
   kartaListuDoWiadomosci,

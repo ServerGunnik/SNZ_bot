@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS tickety (
   historia_wiad_id TEXT,
   list_id INTEGER,
   narada_id TEXT, -- kanał narady administracji
+  ostatnia_aktywnosc INTEGER,
+  przypomniano INTEGER,
+  ostrzezono_nieaktywnosc INTEGER,
   ocena INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_tickety_user ON tickety(user_id, status);
@@ -182,7 +185,9 @@ CREATE TABLE IF NOT EXISTS mod_call (
   utworzone INTEGER NOT NULL,
   przyjete INTEGER,
   przyjmujacy TEXT,
-  liczba_pingow INTEGER DEFAULT 1
+  liczba_pingow INTEGER DEFAULT 1,
+  pomoc_kanal_id TEXT,
+  sprzatniete INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_modcall_user ON mod_call(user_id, status);
 

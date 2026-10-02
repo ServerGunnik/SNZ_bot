@@ -1,6 +1,9 @@
 const { AttachmentBuilder } = require('discord.js');
 
-async function zbierzWiadomosci(kanal, limit = 500) {
+// Pobieranie idzie od najnowszych, więc przy przekroczeniu limitu odpadają najstarsze wiadomości
+const LIMIT_WIADOMOSCI = 5000;
+
+async function zbierzWiadomosci(kanal, limit = LIMIT_WIADOMOSCI) {
   const wiadomosci = [];
   let ostatnie = null;
   while (wiadomosci.length < limit) {
@@ -27,6 +30,9 @@ function formatujTekst(wiadomosci, kanal) {
   const linie = [];
   linie.push(`=== Transkrypt kanału #${kanal.name} (${kanal.id}) ===`);
   linie.push(`Wygenerowano: ${new Date().toISOString()}`);
+  if (wiadomosci.length >= LIMIT_WIADOMOSCI) {
+    linie.push(`UWAGA: kanał miał więcej niż ${LIMIT_WIADOMOSCI} wiadomości — zapisano tylko ${LIMIT_WIADOMOSCI} najnowszych.`);
+  }
   linie.push('');
   for (const w of wiadomosci) {
     const czas = w.createdAt.toISOString();

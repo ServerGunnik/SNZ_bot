@@ -17,6 +17,10 @@ const q = {
   otwarteUsera: db.prepare("SELECT * FROM tickety WHERE user_id = ? AND status = 'otwarty'"),
   zamknijUsuniety: db.prepare("UPDATE tickety SET status = 'zamkniety', zamkniety = ?, wyjasnienie = 'Kanał ticketu został usunięty ręcznie.' WHERE id = ?"),
   zapiszNarade: db.prepare('UPDATE tickety SET narada_id = ? WHERE id = ?'),
+  otwarte: db.prepare("SELECT * FROM tickety WHERE status = 'otwarty'"),
+  aktywnosc: db.prepare("UPDATE tickety SET ostatnia_aktywnosc = ?, ostrzezono_nieaktywnosc = NULL WHERE kanal_id = ? AND status = 'otwarty'"),
+  przypomniano: db.prepare('UPDATE tickety SET przypomniano = ? WHERE id = ?'),
+  ostrzezono: db.prepare('UPDATE tickety SET ostrzezono_nieaktywnosc = ? WHERE id = ?'),
   poNaradzie: db.prepare('SELECT * FROM tickety WHERE narada_id = ?'),
   wstaw: db.prepare(`INSERT INTO tickety (kanal_id, user_id, kategoria, kategoria_kod, formularz, temat, otwarty)
     VALUES (?, ?, ?, ?, ?, ?, ?)`),
@@ -136,15 +140,15 @@ function ticketDlaStaffu(interaction, idStr) {
 // ---- Otwieranie: kategoria -> formularz -> kanał -----------------------
 
 async function onKategoriaSelect(interaction) {
-  const kategoria = znajdzKategorie(interaction.values[0]);
+  const zListy = interaction.isStringSelectMenu();
+  const kategoria = znajdzKategorie(zListy ? interaction.values[0] : interaction.customId.split(':')[2]);
   const otwarte = kategoria ? liczbaOtwartych(interaction) : 0;
   if (!kategoria || otwarte >= config.tickety.limitOtwartych) {
-    // Odpowiedź przez update panelu = reset wyboru, komunikat jako prywatna wiadomość
+    const blad = kategoria ? bladLimitu(otwarte) : karty.kartaBlad('Panel nieaktualny', 'Ta kategoria już nie istnieje. Wybierz inną.');
+    if (!zListy) return odpowiedz(interaction, blad);
+    // Stary panel z listą: update panelu = reset wyboru, komunikat jako prywatna wiadomość
     await interaction.update(karty.panelTicketow(config.tickety.kategorie));
-    return interaction.followUp({
-      ...(kategoria ? bladLimitu(otwarte) : karty.kartaBlad('Panel nieaktualny', 'Ta kategoria już nie istnieje. Wybierz inną.')),
-      flags: EPHEMERAL_V2,
-    });
+    return interaction.followUp({ ...blad, flags: EPHEMERAL_V2 });
   }
 
   const modal = new ModalBuilder()
@@ -441,12 +445,64 @@ async function wyslijHistorie(client, ticket, zalacznik, zalacznikNarady = null)
   return wiad;
 }
 
+// Wspólne zamknięcie ticketu: kanał, historia, logi, DM z oceną, usunięcie kanałów.
+// zamykajacy: { id, tag } - administrator albo sam bot (automatyczne zamknięcie)
+async function zamknijTicket(client, ticket, { zamykajacy, kod, wyjasnienie }) {
+  const wynik = config.tickety.wyniki[kod];
+  const kanal = await client.channels.fetch(ticket.kanal_id).catch(() => null);
+  q.zamknij.run(Date.now(), zamykajacy.id, wyjasnienie, kod, ticket.id);
+  const zamkniety = q.poId.get(ticket.id);
+
+  // Wynik i wyjaśnienie widoczne w kanale (trafi też do transkryptu)
+  if (kanal) await kanal.send(karty.kartaWyjasnieniaTicketu({ zamykajacy: zamykajacy.id, wyjasnienie, wynik, wynikKod: kod })).catch(() => null);
+
+  const pola = polaTicketu(zamkniety);
+  const notatki = q.notatki.all(ticket.id);
+  const zalacznik = kanal ? await transkrypt(kanal, {
+    dopisek: [
+      ...(pola.length ? ['=== Formularz ===', ...pola.map(p => `${p.label}: ${p.wartosc || '-'}`), ''] : []),
+      `=== Wynik: ${wynik.label} ===`,
+      `Zamknął: ${zamykajacy.tag} (${zamykajacy.id})`,
+      `Wyjaśnienie: ${wyjasnienie}`,
+      ...(notatki.length ? [
+        '',
+        '=== Notatki staffu (niewidoczne dla gracza) ===',
+        ...notatki.map(n => `[${new Date(n.data).toISOString()}] ${n.autor_id}: ${n.tresc}`),
+      ] : []),
+    ],
+  }).catch(() => null) : null;
+
+  const narada = ticket.narada_id && await client.channels.fetch(ticket.narada_id).catch(() => null);
+  const zalacznikNarady = narada ? await transkrypt(narada).catch(() => null) : null;
+  const historia = await wyslijHistorie(client, zamkniety, zalacznik, zalacznikNarady);
+
+  await log(client, {
+    tytul: `Zamknięto zgłoszenie #${ticket.id}`,
+    opis:
+      `**Kategoria:** ${ticket.kategoria}\n**Autor:** <@${ticket.user_id}>\n**Zamknął:** <@${zamykajacy.id}>\n` +
+      `**Wynik:** ${wynik.emoji} ${wynik.label}` +
+      (historia ? `\n**Historia:** ${historia.url}` : '\n**Historia:** _nie zapisano — ustaw KANAL_HISTORIA_TICKETOW_'),
+    kolor: kolory.neutralny,
+    kanal: 'logiTickety',
+  });
+
+  // Ocena w DM razem z wynikiem i wyjaśnieniem
+  const user = await client.users.fetch(ticket.user_id).catch(() => null);
+  if (user) await user.send(karty.kartaOcenyTicketu(ticket.id, wyjasnienie, wynik)).catch(() => null);
+
+  setTimeout(() => {
+    if (kanal) kanal.delete('Ticket zamknięty').catch(() => null);
+    if (narada) narada.delete('Ticket zamknięty').catch(() => null);
+  }, 5000);
+  return historia;
+}
+
 async function onZamknijModal(interaction) {
   const [, , idStr, kod] = interaction.customId.split(':');
   const ticket = ticketDlaStaffu(interaction, idStr);
   if (!ticket) return;
   const wynik = config.tickety.wyniki[kod];
-  if (!wynik || ticket.kanal_id !== interaction.channel?.id) {
+  if (!wynik || wynik.ukryty || ticket.kanal_id !== interaction.channel?.id) {
     return odpowiedz(interaction, karty.kartaBlad('Nie można zamknąć', 'Zamknij zgłoszenie ponownie przyciskiem na karcie ticketu.'));
   }
   const wyjasnienie = interaction.fields.getTextInputValue('wyjasnienie').trim();
@@ -455,51 +511,63 @@ async function onZamknijModal(interaction) {
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  q.zamknij.run(Date.now(), interaction.user.id, wyjasnienie, kod, ticket.id);
-  const zamkniety = q.poId.get(ticket.id);
-
-  // Wynik i wyjaśnienie widoczne w kanale (trafi też do transkryptu)
-  await interaction.channel.send(karty.kartaWyjasnieniaTicketu({ zamykajacy: interaction.user.id, wyjasnienie, wynik, wynikKod: kod })).catch(() => null);
-
-  const pola = polaTicketu(zamkniety);
-  const notatki = q.notatki.all(ticket.id);
-  const zalacznik = await transkrypt(interaction.channel, {
-    dopisek: [
-      ...(pola.length ? ['=== Formularz ===', ...pola.map(p => `${p.label}: ${p.wartosc || '-'}`), ''] : []),
-      `=== Wynik: ${wynik.label} ===`,
-      `Zamknął: ${interaction.user.tag} (${interaction.user.id})`,
-      `Wyjaśnienie: ${wyjasnienie}`,
-      ...(notatki.length ? [
-        '',
-        '=== Notatki staffu (niewidoczne dla gracza) ===',
-        ...notatki.map(n => `[${new Date(n.data).toISOString()}] ${n.autor_id}: ${n.tresc}`),
-      ] : []),
-    ],
-  }).catch(() => null);
-
-  const narada = ticket.narada_id && await interaction.client.channels.fetch(ticket.narada_id).catch(() => null);
-  const zalacznikNarady = narada ? await transkrypt(narada).catch(() => null) : null;
-  const historia = await wyslijHistorie(interaction.client, zamkniety, zalacznik, zalacznikNarady);
-
-  await log(interaction.client, {
-    tytul: `Zamknięto zgłoszenie #${ticket.id}`,
-    opis:
-      `**Kategoria:** ${ticket.kategoria}\n**Autor:** <@${ticket.user_id}>\n**Zamknął:** <@${interaction.user.id}>\n` +
-      `**Wynik:** ${wynik.emoji} ${wynik.label}` +
-      (historia ? `\n**Historia:** ${historia.url}` : '\n**Historia:** _nie zapisano — ustaw KANAL_HISTORIA_TICKETOW_'),
-    kolor: kolory.neutralny,
-    kanal: 'logiTickety',
-  });
-
-  // Ocena w DM razem z wynikiem i wyjaśnieniem
-  const user = await interaction.client.users.fetch(ticket.user_id).catch(() => null);
-  if (user) await user.send(karty.kartaOcenyTicketu(ticket.id, wyjasnienie, wynik)).catch(() => null);
-
+  await zamknijTicket(interaction.client, ticket, { zamykajacy: interaction.user, kod, wyjasnienie });
   await interaction.editReply(karty.kartaSukces('Ticket zamknięty', 'Kanał zostanie usunięty za 5 sekund.'));
-  setTimeout(() => {
-    interaction.channel.delete('Ticket zamknięty').catch(() => null);
-    if (narada) narada.delete('Ticket zamknięty').catch(() => null);
-  }, 5000);
+}
+
+// ---- Aktywność, przypomnienia i automatyczne zamykanie -----------------
+
+// Każda wiadomość gracza lub staffu w tickecie odświeża licznik nieaktywności
+function zarejestrujAktywnosc(wiadomosc) {
+  if (!wiadomosc.guild || wiadomosc.author?.bot) return;
+  q.aktywnosc.run(Date.now(), wiadomosc.channelId);
+}
+
+const GODZINA_MS = 60 * 60 * 1000;
+
+async function sprawdzTickety(client) {
+  const { przypomnienieGodz, nieaktywnoscGodz, zamkniecieGodzPoOstrzezeniu } = config.tickety;
+  const teraz = Date.now();
+  for (const ticket of q.otwarte.all()) {
+    const kanal = await client.channels.fetch(ticket.kanal_id).catch(() => null);
+    if (!kanal) continue;
+
+    // Nikt z administracji nie przejął ticketu - jednorazowe przypomnienie na naradzie
+    if (przypomnienieGodz > 0 && !ticket.przydzielony && !ticket.przypomniano && teraz - ticket.otwarty >= przypomnienieGodz * GODZINA_MS) {
+      q.przypomniano.run(teraz, ticket.id);
+      const cel = (ticket.narada_id && await client.channels.fetch(ticket.narada_id).catch(() => null)) || null;
+      const staff = config.role.staff;
+      const tresc = `Ticket **#${ticket.id}** (${ticket.kategoria}) czeka od ponad ${przypomnienieGodz} h i nikt go nie przejął: <#${ticket.kanal_id}>`;
+      if (cel) {
+        await cel.send({ content: `${staff ? `<@&${staff}> ` : ''}${tresc}`, allowedMentions: staff ? { roles: [staff] } : { parse: [] } }).catch(() => null);
+      } else {
+        await log(client, { tytul: 'Nieprzejęty ticket', opis: tresc, kolor: kolory.ostrzezenie, kanal: 'logiTickety' });
+      }
+    }
+
+    if (!(nieaktywnoscGodz > 0)) continue;
+    const ostatnio = ticket.ostatnia_aktywnosc || ticket.otwarty;
+    if (!ticket.ostrzezono_nieaktywnosc && teraz - ostatnio >= nieaktywnoscGodz * GODZINA_MS) {
+      q.ostrzezono.run(teraz, ticket.id);
+      // Karta V2 nie może mieć zwykłej treści, więc ping idzie osobną wiadomością
+      await kanal.send({ content: `<@${ticket.user_id}>`, allowedMentions: { users: [ticket.user_id] } }).catch(() => null);
+      await kanal.send(karty.kartaOstrzezenie('Brak aktywności',
+        `W tym zgłoszeniu nikt nie pisał od ${nieaktywnoscGodz} h. Jeśli nic się nie zmieni, zostanie automatycznie zamknięte <t:${Math.floor((teraz + zamkniecieGodzPoOstrzezeniu * GODZINA_MS) / 1000)}:R>.\n` +
+        'Napisz cokolwiek, żeby zostawić je otwarte.')).catch(() => null);
+    } else if (ticket.ostrzezono_nieaktywnosc && teraz - ticket.ostrzezono_nieaktywnosc >= zamkniecieGodzPoOstrzezeniu * GODZINA_MS) {
+      await zamknijTicket(client, ticket, {
+        zamykajacy: { id: client.user.id, tag: client.user.tag },
+        kod: 'nieaktywne',
+        wyjasnienie: `Zgłoszenie zamknięto automatycznie — brak odpowiedzi przez ${nieaktywnoscGodz + zamkniecieGodzPoOstrzezeniu} h. Jeśli sprawa jest nadal aktualna, otwórz nowe zgłoszenie.`,
+      }).catch((e) => console.error('[tickety] automatyczne zamknięcie', e));
+    }
+  }
+}
+
+function uruchomZadaniaTicketow(client) {
+  const tick = () => sprawdzTickety(client).catch((e) => console.error('[tickety] zadania cykliczne', e));
+  setInterval(tick, 10 * 60 * 1000);
+  setTimeout(tick, 30 * 1000);
 }
 
 async function onOcena(interaction) {
@@ -534,4 +602,4 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('ticket:ocena', onOcena);
 }
 
-module.exports = { rejestruj, obsluzUsuniecieKanalu };
+module.exports = { rejestruj, obsluzUsuniecieKanalu, zarejestrujAktywnosc, uruchomZadaniaTicketow, sprawdzTickety };

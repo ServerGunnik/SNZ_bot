@@ -1,9 +1,8 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const db = require('../database/db.js');
 const karty = require('../utils/karty.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
-
-const q = { historia: db.prepare('SELECT * FROM ostrzezenia WHERE user_id = ? ORDER BY data DESC') };
+const config = require('../config.js');
+const { ostrzezeniaUzytkownika, powodNieaktywnosci } = require('../modules/ostrzezenia.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,9 +18,12 @@ module.exports = {
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
     }
-    const warny = q.historia.all(user.id);
+    const warny = ostrzezeniaUzytkownika(user.id).map(w => ({ ...w, nieaktywne: powodNieaktywnosci(w) }));
     await interaction.reply({
-      ...karty.kartaOstrzezen({ user_id: user.id, warny, avatar: user.displayAvatarURL({ size: 128 }) }),
+      ...karty.kartaOstrzezen({
+        user_id: user.id, warny, avatar: user.displayAvatarURL({ size: 128 }),
+        waznoscDni: config.ostrzezenia.waznoscDni, progi: config.ostrzezenia.prog,
+      }),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   },

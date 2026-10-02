@@ -2,6 +2,7 @@
 const config = require('../config.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const { usunietePrzezAutomod } = require('./automod.js');
 
 const MAX_TRESC = 1500;
 
@@ -28,7 +29,7 @@ function autorISzczegoly(wiadomosc) {
 }
 
 async function obsluzUsuniecie(wiadomosc) {
-  if (!doLogowania(wiadomosc)) return;
+  if (!doLogowania(wiadomosc) || usunietePrzezAutomod.has(wiadomosc.id)) return;
   // Wiadomość sprzed uruchomienia bota - Discord nie przesyła jej treści
   if (wiadomosc.partial) {
     await log(wiadomosc.client, {
@@ -68,6 +69,7 @@ async function obsluzEdycje(stara, nowa) {
 
 async function obsluzMasoweUsuniecie(wiadomosci, kanal) {
   if (!kanal.guild || (config.guildId && kanal.guild.id !== config.guildId)) return;
+  if ([...wiadomosci.keys()].every(id => usunietePrzezAutomod.has(id))) return;
   const znane = [...wiadomosci.values()].filter(w => !w.partial && !w.author?.bot).reverse();
   const podglad = znane.slice(0, 15).map(w => `<@${w.author.id}>: ${(w.content || '_(brak tekstu)_').slice(0, 120)}`);
   await log(kanal.client, {
