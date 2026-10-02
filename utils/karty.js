@@ -13,6 +13,8 @@ const {
   StringSelectMenuOptionBuilder,
   UserSelectMenuBuilder,
   FileBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
 } = require('discord.js');
 
@@ -537,23 +539,59 @@ function kartaListyListow({ status, listy, total, strona, stron, guildId, czySta
 }
 
 function kartaZgloszeniaListu({ list, zgloszenie }) {
-  const c = kontener(kolory.info);
-  c.addTextDisplayComponents(tekst(`## Zgłoszenie zatrzymania — list #${list.id}`));
+  const status = { zatwierdzone: '✅ zatwierdzone', odrzucone: '❌ odrzucone' }[zgloszenie.status];
+  const c = kontener(zgloszenie.status === 'zatwierdzone' ? kolory.sukces : zgloszenie.status === 'odrzucone' ? kolory.blad : kolory.info);
+  c.addTextDisplayComponents(tekst(`## Zgłoszenie zatrzymania #${zgloszenie.id} — list #${list.id}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Poszukiwany:** \`${list.nick}\`\n` +
-    `**Zgłaszający:** <@${zgloszenie.zglaszajacy_id}>\n` +
-    `**Dowód:**\n${zgloszenie.dowod}`
+    `**Powód listu:** ${list.powod}\n` +
+    `**Zgłaszający:** <@${zgloszenie.zglaszajacy_id}>${zgloszenie.zglaszajacy_dodany ? ' _(dodany do kanału)_' : ''}\n` +
+    `**Wysłane:** <t:${Math.floor(zgloszenie.utworzone / 1000)}:f>` +
+    (status ? `\n**Decyzja:** ${status}${zgloszenie.rozpatrzyl ? ` — <@${zgloszenie.rozpatrzyl}>` : ''}` : '')
   ));
-  c.addSeparatorComponents(separator(false));
-  c.addActionRowComponents(new ActionRowBuilder().addComponents(
-    przycisk(`list:zgl:ok:${zgloszenie.id}`, 'Zatwierdź', ButtonStyle.Success),
-    przycisk(`list:zgl:no:${zgloszenie.id}`, 'Odrzuć', ButtonStyle.Danger),
-  ));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(`**Opis:**\n${zgloszenie.dowod}${zgloszenie.link ? `\n\n**Link:** ${zgloszenie.link}` : ''}`));
+  if (zgloszenie.status === 'oczekuje') {
+    c.addTextDisplayComponents(tekst('-# Dowody (pliki) są w wiadomości poniżej. Zgłaszający nie widzi tego kanału, dopóki go nie dodacie.'));
+    c.addSeparatorComponents(separator(false));
+    const przyciski = [
+      przycisk(`list:zgl:ok:${zgloszenie.id}`, 'Zatwierdź', ButtonStyle.Success),
+      przycisk(`list:zgl:no:${zgloszenie.id}`, 'Odrzuć', ButtonStyle.Danger),
+    ];
+    if (zgloszenie.kanal_id) {
+      przyciski.push(przycisk(`list:zgl-dodaj:${zgloszenie.id}`, zgloszenie.zglaszajacy_dodany ? 'Zgłaszający dodany' : 'Dodaj zgłaszającego do kanału',
+        ButtonStyle.Secondary, null, Boolean(zgloszenie.zglaszajacy_dodany)));
+    }
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(...przyciski));
+  }
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Dowody zatrzymania: zdjęcia/nagrania jako galeria, inne pliki jako załączniki, za duże jako linki
+function kartaDowodowZatrzymania({ pliki = [], linki = [] }) {
+  const c = kontener(kolory.neutralny);
+  c.addTextDisplayComponents(tekst('### Dowody'));
+  const media = pliki.filter(p => /^(image|video)\//.test(p.typ));
+  const inne = pliki.filter(p => !/^(image|video)\//.test(p.typ));
+  if (media.length) {
+    c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(
+      ...media.map(p => new MediaGalleryItemBuilder().setURL(`attachment://${p.nazwa}`))
+    ));
+  }
+  for (const p of inne) c.addFileComponents(new FileBuilder().setURL(`attachment://${p.nazwa}`));
+  if (linki.length) c.addTextDisplayComponents(tekst(linki.map(l => `• ${l}`).join('\n')));
+  if (!pliki.length && !linki.length) c.addTextDisplayComponents(tekst('_Brak dowodów._'));
   return { components: [c], ...FLAGS_V2 };
 }
 
 // ---- Sąd ---------------------------------------------------------------
+
+function opisPozwanego(sprawa) {
+  if (sprawa.pozwany_typ === 'gracz') return `<@${sprawa.pozwany_wartosc}>`;
+  if (sprawa.pozwany_typ === 'nick') return `\`${sprawa.pozwany_wartosc}\``;
+  return `Państwo **${sprawa.pozwany_wartosc}**`;
+}
 
 function kartaSprawy({ sprawa, dowody = [] }) {
   const kolor = {
@@ -570,7 +608,7 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
-    `**Pozwany:** ${sprawa.pozwany_typ === 'nick' ? `\`${sprawa.pozwany_wartosc}\`` : `Państwo **${sprawa.pozwany_wartosc}**`}\n` +
+    `**Pozwany:** ${opisPozwanego(sprawa)}\n` +
     `**Sędzia:** ${sprawa.sedzia_id ? `<@${sprawa.sedzia_id}>` : '_oczekuje na przyjęcie_'}\n` +
     `**Status:** ${sprawa.status.replace('_', ' ')}\n` +
     `**Data złożenia:** <t:${Math.floor(sprawa.utworzona / 1000)}:f>`
@@ -599,19 +637,18 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   c.addSeparatorComponents(separator(false));
 
   const przyciski = [];
-  const czekaNaSedziego = sprawa.status === 'zlozona' || (sprawa.status === 'odwolanie' && !sprawa.sedzia_id);
-  if (czekaNaSedziego) {
-    przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`,
-      sprawa.status === 'odwolanie' ? 'Przyjmij odwołanie' : 'Przyjmij sprawę', ButtonStyle.Success));
+  if (sprawa.status === 'zlozona' && !sprawa.sedzia_id) {
+    przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`, 'Przyjmij sprawę', ButtonStyle.Success));
   }
-  if (['przyjeta', 'w_toku', 'odwolanie'].includes(sprawa.status) && sprawa.sedzia_id) {
+  if (['przyjeta', 'w_toku'].includes(sprawa.status) && sprawa.sedzia_id) {
     przyciski.push(
       przycisk(`sad:dowod:${sprawa.id}`, 'Dodaj dowód', ButtonStyle.Secondary),
       przycisk(`sad:wyrok:${sprawa.id}`, 'Wydaj wyrok', ButtonStyle.Primary),
     );
   }
-  if (sprawa.status === 'wyrok' && !sprawa.odwolanie) {
-    przyciski.push(przycisk(`sad:odwol:${sprawa.id}`, 'Odwołaj się', ButtonStyle.Danger));
+  if (sprawa.status === 'wyrok') {
+    c.addTextDisplayComponents(tekst('-# Wyrok jest ostateczny — nie przysługuje od niego odwołanie.'));
+    przyciski.push(przycisk(`sad:zamknij:${sprawa.id}`, 'Zamknij sprawę', ButtonStyle.Secondary));
   }
   if (przyciski.length) c.addActionRowComponents(new ActionRowBuilder().addComponents(...przyciski));
   return { components: [c], ...FLAGS_V2 };
@@ -623,7 +660,7 @@ function kartaWyroku({ sprawa }) {
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
-    `**Pozwany:** ${sprawa.pozwany_typ === 'nick' ? `\`${sprawa.pozwany_wartosc}\`` : `Państwo **${sprawa.pozwany_wartosc}**`}\n` +
+    `**Pozwany:** ${opisPozwanego(sprawa)}\n` +
     `**Sędzia:** <@${sprawa.sedzia_id}>\n` +
     `**Data wyroku:** <t:${Math.floor(sprawa.wyrok_data / 1000)}:f>`
   ));
@@ -727,7 +764,7 @@ module.exports = {
   panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
   kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku, kartaNarady,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
-  kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow,
+  kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow, kartaDowodowZatrzymania,
   kartaSprawy, kartaWyroku,
   kartaModCall, kartaPowitania,
   panelSelfrole,

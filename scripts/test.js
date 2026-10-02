@@ -120,6 +120,8 @@ const karty = wymagaj('utils/karty.js');
     kartaModCall: () => karty.kartaModCall({ user_id: '1', kanal_id: '2', waiting: false, status: 'Anulowane' }),
     kartaOstrzezen: () => karty.kartaOstrzezen({ user_id: '1', warny: [{ id: 1, data: 0, wystawca_id: '2', powod: 'x', nieaktywne: 'wygasło' }], avatar: 'https://cdn.discordapp.com/embed/avatars/0.png', waznoscDni: 30, progi: { mute: 3, ban: 5 } }),
     kartaPowitania: () => karty.kartaPowitania({ userId: '1', liczbaCzlonkow: 10, kanalWeryfikacji: '2' }),
+    kartaDowodowZatrzymania: () => karty.kartaDowodowZatrzymania({ pliki: [{ nazwa: 'a.png', typ: 'image/png' }, { nazwa: 'b.txt', typ: 'text/plain' }], linki: ['https://x'] }),
+    kartaZgloszeniaListu: () => karty.kartaZgloszeniaListu({ list: { id: 1, nick: 'S', powod: 'x' }, zgloszenie: { id: 1, zglaszajacy_id: '2', dowod: 'opis', link: 'https://x', utworzone: 0, status: 'oczekuje', kanal_id: 'K' } }),
   };
   for (const [nazwa, fn] of Object.entries(kartyDoSprawdzenia)) {
     await bezpiecznie(`karta ${nazwa}`, async () => { for (const c of fn().components) c.toJSON(); });
@@ -268,6 +270,48 @@ const karty = wymagaj('utils/karty.js');
   zdarzenia.length = 0;
   await antynuke.obsluzWpisAudytu({ action: AuditLogEvent.MemberBanAdd, executorId: 'WLASCICIEL', targetId: 'X', changes: [] }, guild);
   sprawdz(zdarzenia.length === 0, 'właściciel serwera jest na whiteliście');
+
+  // ---------------------------------------------------------------------
+  sekcja('Sąd: konflikt interesów, brak odwołań, stały sędzia');
+  const sad = wymagaj('modules/sad.js');
+  db.prepare("INSERT INTO panstwa (id, nazwa, lider_id, utworzone) VALUES (2, 'Niemcy', 'KROL2', 0)").run();
+  db.prepare("INSERT INTO weryfikacja (user_id, nick, data) VALUES ('SEDZIA_PL', 'SedziaPL', 0), ('SEDZIA_OK', 'SedziaOK', 0)").run();
+  db.prepare("INSERT INTO panstwa_czlonkowie (panstwo_id, nick, dodany) VALUES (1, 'SedziaPL', 0)").run();
+  const sprawaGracz = { pozywajacy_id: 'KROL2', pozwany_typ: 'gracz', pozwany_wartosc: 'POZWANY' };
+  sprawdz(sad.konfliktInteresow(sprawaGracz, 'POZWANY'), 'pozwany gracz nie może sądzić własnej sprawy');
+  sprawdz(sad.konfliktInteresow(sprawaGracz, 'KROL2'), 'pozywający nie może sądzić własnej sprawy');
+  const sprawaPanstwo = { pozywajacy_id: 'KROL2', pozwany_typ: 'panstwo', pozwany_wartosc: 'Polska' };
+  sprawdz(sad.konfliktInteresow(sprawaPanstwo, 'SEDZIA_PL'), 'członek pozwanego państwa nie może sądzić');
+  sprawdz(sad.konfliktInteresow(sprawaPanstwo, 'KROL'), 'król pozwanego państwa nie może sądzić');
+  sprawdz(!sad.konfliktInteresow(sprawaPanstwo, 'SEDZIA_OK'), 'neutralny sędzia może sądzić');
+  db.prepare("INSERT INTO sprawy (id, numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, utworzona, status) VALUES (2, 'SNZ-2026-0002', 'KROL2', 'panstwo', 'Polska', 'z', 'o', 0, 'zlozona')").run();
+  await bezpiecznie('przyjęcie z konfliktem', () => znajdz('sad:przyjmij:2')(atrapa('sad:przyjmij:2', staff, { user: { id: 'SEDZIA_PL' } })));
+  sprawdz(!db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id, 'sędzia z konfliktem nie przyjął sprawy');
+  await bezpiecznie('przyjęcie', () => znajdz('sad:przyjmij:2')(atrapa('sad:przyjmij:2', staff, { user: { id: 'SEDZIA_OK' } })));
+  sprawdz(db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id === 'SEDZIA_OK', 'neutralny sędzia przyjął sprawę');
+  await bezpiecznie('ponowne przyjęcie', () => znajdz('sad:przyjmij:2')(atrapa('sad:przyjmij:2', staff, { user: { id: 'INNY_SEDZIA' } })));
+  sprawdz(db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id === 'SEDZIA_OK', 'sędzia się nie zmienia');
+  const kartaSprawy = JSON.stringify(karty.kartaSprawy({ sprawa: { ...db.prepare('SELECT * FROM sprawy WHERE id = 2').get(), status: 'wyrok', werdykt: 'w', kara: 'k' } }).components[0].toJSON());
+  sprawdz(!kartaSprawy.includes('sad:odwol'), 'po wyroku nie ma przycisku odwołania');
+
+  // ---------------------------------------------------------------------
+  sekcja('List gończy: zgłoszenie zatrzymania z dowodem');
+  const plik = { name: 'film.mp4', url: 'https://cdn.discordapp.com/x/film.mp4', size: 50 * 1024 * 1024, contentType: 'video/mp4' };
+  const przed = kanaly.size;
+  await bezpiecznie('zgłoszenie zatrzymania', () => znajdz('list:zglos-modal:1')(atrapa('list:zglos-modal:1', gracz, {
+    user: { id: 'LOWCA', username: 'lowca' },
+    fields: {
+      getTextInputValue: (id) => ({ opis: 'Złapałem go przy spawnie o 20:00', link: 'https://youtu.be/abc' })[id] || '',
+      getUploadedFiles: () => new Collection([['1', plik]]),
+    },
+  })));
+  const zgl = db.prepare('SELECT * FROM listy_zgloszenia WHERE zglaszajacy_id = ?').get('LOWCA');
+  sprawdz(zgl && zgl.kanal_id && kanaly.size === przed + 1, 'powstał kanał zgłoszenia dla administracji');
+  sprawdz(zgl && zgl.link === 'https://youtu.be/abc', 'zapisano link do nagrania');
+  await bezpiecznie('dodanie zgłaszającego', () => znajdz(`list:zgl-dodaj:${zgl.id}`)(atrapa(`list:zgl-dodaj:${zgl.id}`, staff, { channel: kanaly.get(zgl.kanal_id) })));
+  sprawdz(db.prepare('SELECT zglaszajacy_dodany FROM listy_zgloszenia WHERE id = ?').get(zgl.id).zglaszajacy_dodany === 1, 'zgłaszający dodany do kanału');
+  await bezpiecznie('zatwierdzenie', () => znajdz(`list:zgl:ok:${zgl.id}`)(atrapa(`list:zgl:ok:${zgl.id}`, staff, { channel: kanaly.get(zgl.kanal_id) })));
+  sprawdz(db.prepare('SELECT status FROM listy_goncze WHERE id = 1').get().status === 'zrealizowany', 'list zrealizowany po zatwierdzeniu');
 
   // ---------------------------------------------------------------------
   console.log(`\n${testy - bledy}/${testy} sprawdzeń OK`);

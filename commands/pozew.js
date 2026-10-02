@@ -5,7 +5,6 @@ const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
 const { jestLider } = require('../utils/uprawnienia.js');
-const { walidujNick } = require('../utils/minecraft.js');
 const { log, wyslij } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 
@@ -16,13 +15,12 @@ const q = {
   zapiszKanal: db.prepare('UPDATE sprawy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   ostatnia: db.prepare("SELECT numer FROM sprawy ORDER BY id DESC LIMIT 1"),
   panstwaPoNazwie: db.prepare('SELECT * FROM panstwa WHERE nazwa = ? COLLATE NOCASE'),
-  weryfikacjaPoNicku: db.prepare('SELECT * FROM weryfikacja WHERE nick = ? COLLATE NOCASE'),
+  wszystkiePanstwa: db.prepare('SELECT nazwa FROM panstwa ORDER BY nazwa COLLATE NOCASE'),
+  panstwoLidera: db.prepare('SELECT * FROM panstwa WHERE lider_id = ?'),
 };
 
-// Discord ID strony pozwanej: zweryfikowany właściciel nicku albo lider pozwanego państwa
-function idPozwanego(typ, pozwany) {
-  if (typ === 'nick') return q.weryfikacjaPoNicku.get(pozwany)?.user_id || null;
-  return q.panstwaPoNazwie.get(pozwany)?.lider_id || null;
+function blad(interaction, tytul, opis) {
+  return interaction.reply({ ...karty.kartaBlad(tytul, opis), flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
 }
 
 function nastepnyNumer() {
@@ -42,11 +40,20 @@ module.exports = {
     .setDescription('Złóż pozew do Sądu Sojuszniczego (dla liderów)')
     .setDMPermission(false)
     .addStringOption(o => o.setName('typ-pozwanego').setDescription('Kogo pozywasz').setRequired(true)
-      .addChoices({ name: 'gracza (nick)', value: 'nick' }, { name: 'państwo', value: 'panstwo' }))
-    .addStringOption(o => o.setName('pozwany').setDescription('Nick lub nazwa państwa').setRequired(true))
+      .addChoices({ name: 'gracza (konto Discord)', value: 'gracz' }, { name: 'państwo', value: 'panstwo' }))
     .addStringOption(o => o.setName('zarzut').setDescription('Krótki zarzut').setRequired(true))
     .addStringOption(o => o.setName('opis').setDescription('Szczegółowy opis').setRequired(true))
+    .addUserOption(o => o.setName('gracz').setDescription('Pozwany gracz (wybierz konto Discord) — przy typie „gracz”'))
+    .addStringOption(o => o.setName('panstwo').setDescription('Pozwane państwo — przy typie „państwo”').setAutocomplete(true))
     .addStringOption(o => o.setName('dowody').setDescription('Dowody wstępne (linki, opis)')),
+
+  async autocomplete(interaction) {
+    const wpis = interaction.options.getFocused().toLowerCase();
+    await interaction.respond(
+      q.wszystkiePanstwa.all().filter(p => p.nazwa.toLowerCase().includes(wpis)).slice(0, 25)
+        .map(p => ({ name: p.nazwa, value: p.nazwa }))
+    );
+  },
 
   async execute(interaction) {
     if (!jestLider(interaction.member)) {
@@ -56,18 +63,23 @@ module.exports = {
       });
     }
     const typ = interaction.options.getString('typ-pozwanego');
-    const pozwany = interaction.options.getString('pozwany').trim();
-    if (typ === 'nick' && !walidujNick(pozwany)) {
-      return interaction.reply({
-        ...karty.kartaBlad('Nieprawidłowy nick', 'Nick musi mieć 3–16 znaków.'),
-        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-      });
-    }
-    if (typ === 'panstwo' && !q.panstwaPoNazwie.get(pozwany)) {
-      return interaction.reply({
-        ...karty.kartaBlad('Brak państwa', `Państwo **${pozwany}** nie istnieje w rejestrze.`),
-        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-      });
+    let pozwany;
+    let pozwanyId;
+    if (typ === 'gracz') {
+      // Pozwany to konto Discord, nie nick - nikt nie podszyje się pod cudzy nick, a sędzia-pozwany jest zawsze rozpoznany
+      const user = interaction.options.getUser('gracz');
+      if (!user) return blad(interaction, 'Brak pozwanego', 'Przy typie „gracz” wybierz pozwanego w opcji `gracz`.');
+      if (user.id === interaction.user.id) return blad(interaction, 'Nieprawidłowy pozwany', 'Nie możesz pozwać samego siebie.');
+      if (user.bot) return blad(interaction, 'Nieprawidłowy pozwany', 'Nie można pozwać bota.');
+      pozwany = user.id;
+      pozwanyId = user.id;
+    } else {
+      const nazwa = (interaction.options.getString('panstwo') || '').trim();
+      const panstwo = nazwa && q.panstwaPoNazwie.get(nazwa);
+      if (!panstwo) return blad(interaction, 'Brak państwa', nazwa ? `Państwo **${nazwa}** nie istnieje w rejestrze.` : 'Przy typie „państwo” wybierz państwo w opcji `panstwo`.');
+      if (q.panstwoLidera.get(interaction.user.id)?.id === panstwo.id) return blad(interaction, 'Nieprawidłowy pozwany', 'Nie możesz pozwać własnego państwa.');
+      pozwany = panstwo.nazwa;
+      pozwanyId = panstwo.lider_id;
     }
     const zarzut = interaction.options.getString('zarzut');
     const opis = interaction.options.getString('opis');
@@ -83,7 +95,6 @@ module.exports = {
     const staff = config.role.staff;
     const kategoria = config.kanaly.kategoriaSprawy || null;
     // Nadpisanie uprawnień dla osoby spoza serwera wysypałoby tworzenie kanału
-    const pozwanyId = idPozwanego(typ, pozwany);
     const pozwanyNaSerwerze = pozwanyId && await interaction.guild.members.fetch(pozwanyId).catch(() => null);
     const dostepStrony = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory];
     const kanal = await interaction.guild.channels.create({
@@ -106,7 +117,7 @@ module.exports = {
 
     await log(interaction.client, {
       tytul: 'Nowy pozew',
-      opis: `**Sprawa:** ${numer}\n**Pozywający:** <@${interaction.user.id}>\n**Pozwany:** ${typ === 'nick' ? `\`${pozwany}\`` : `Państwo **${pozwany}**`}\n**Kanał:** <#${kanal.id}>`,
+      opis: `**Sprawa:** ${numer}\n**Pozywający:** <@${interaction.user.id}>\n**Pozwany:** ${typ === 'gracz' ? `<@${pozwany}>` : `Państwo **${pozwany}**`}\n**Kanał:** <#${kanal.id}>`,
       kolor: kolory.info,
       kanal: 'logiSad',
     });
