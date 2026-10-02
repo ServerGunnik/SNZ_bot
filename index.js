@@ -19,7 +19,8 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.DirectMessages,
   ],
-  partials: [Partials.Channel],
+  // Partials.Message: zdarzenia usunięcia/edycji także dla wiadomości sprzed uruchomienia bota
+  partials: [Partials.Channel, Partials.Message],
 });
 
 zaladujKomendy(client);

@@ -15,7 +15,7 @@ async function wyslij(client, kanalId, payload) {
 
 async function log(client, { tytul, opis, kolor = kolory.info, kanal = 'logi', stopka = null }) {
   const kanalId = config.kanaly[kanal] || config.kanaly.logi;
-  await wyslij(client, kanalId, karty.kartaInfo({ tytul, opis, kolor, stopka }));
+  await wyslij(client, kanalId, { ...karty.kartaInfo({ tytul, opis, kolor, stopka }), allowedMentions: { parse: [] } });
 }
 
 module.exports = { log, wyslij };

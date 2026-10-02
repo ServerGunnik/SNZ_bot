@@ -107,15 +107,12 @@ function panelTicketow(kategorie) {
     kategorie.map(k => `${k.emoji ? `${k.emoji} ` : '• '}**${k.label}** — ${k.opis}`).join('\n')
   ));
   c.addSeparatorComponents(separator(false));
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('ticket:kategoria')
-    .setPlaceholder('Wybierz kategorię zgłoszenia')
-    .addOptions(kategorie.map(k => {
-      const o = new StringSelectMenuOptionBuilder().setLabel(k.label).setValue(k.value).setDescription(k.opis.slice(0, 100));
-      if (k.emoji) o.setEmoji(k.emoji);
-      return o;
-    }));
-  c.addActionRowComponents(new ActionRowBuilder().addComponents(select));
+  // Przyciski zamiast listy wyboru - nie zapamiętują zaznaczenia, więc kategorię można wybrać ponownie
+  for (let i = 0; i < kategorie.length; i += 5) {
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      ...kategorie.slice(i, i + 5).map(k => przycisk(`ticket:kategoria:${k.value}`, k.label.slice(0, 80), ButtonStyle.Secondary, k.emoji || null))
+    ));
+  }
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -153,7 +150,7 @@ function kartaTicketu({
   c.addTextDisplayComponents(tekst('-# Zgłoszenie zamyka administracja, podając wynik i wyjaśnienie.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
-    przycisk('ticket:przejmij', 'Przejmij', ButtonStyle.Primary),
+    przycisk('ticket:przejmij', przydzielony ? 'Przejęte' : 'Przejmij', ButtonStyle.Primary, null, Boolean(przydzielony)),
     przycisk('ticket:zamknij', 'Zamknij zgłoszenie', ButtonStyle.Danger)
   ));
   const rowStaff = [przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')];
@@ -183,10 +180,10 @@ function listaNotatek(notatki, limitZnakow = 3000) {
   return linie.join('\n');
 }
 
-function kartaNotatekTicketu({ ticketId, notatki }) {
+function kartaNotatekTicketu({ ticketId, notatki, naradaId = null }) {
   const c = kontener(kolory.info);
   c.addTextDisplayComponents(tekst('## 🔒 Panel staffu — notatki'));
-  c.addTextDisplayComponents(tekst('-# Widoczne tylko dla administracji. Gracz nie widzi tych notatek.'));
+  c.addTextDisplayComponents(tekst(`-# Widoczne tylko dla administracji. Gracz nie widzi tych notatek.${naradaId ? ` Narada: <#${naradaId}>` : ''}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(notatki.length ? listaNotatek(notatki) : '_Brak notatek. Dodaj pierwszą przyciskiem poniżej._'));
   c.addSeparatorComponents(separator(false));
@@ -194,6 +191,26 @@ function kartaNotatekTicketu({ ticketId, notatki }) {
     przycisk(`ticket:notatka-dodaj:${ticketId}`, 'Dodaj notatkę', ButtonStyle.Success),
     przycisk(`ticket:notatki:${ticketId}`, 'Odśwież', ButtonStyle.Secondary)
   ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Pierwsza wiadomość na kanale narady administracji
+function kartaNarady({ ticketId, uzytkownik, kategoria, kanalTicketu, pola = [], informacje = [] }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst(`## 🔒 Narada administracji — ticket #${ticketId}`));
+  c.addTextDisplayComponents(tekst('-# Ten kanał widzi tylko administracja. Zostanie usunięty razem z ticketem, a rozmowa trafi do historii.'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**Kategoria:** ${kategoria}\n**Zgłaszający:** <@${uzytkownik}>\n**Kanał ticketu:** <#${kanalTicketu}>`
+  ));
+  if (pola.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`### Formularz\n${tekstFormularza(pola)}`.slice(0, 2500)));
+  }
+  if (informacje.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(informacje.join('\n')));
+  }
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -205,7 +222,7 @@ function kartaWynikuTicketu(ticketId, wyniki) {
   c.addTextDisplayComponents(tekst('Jaki jest wynik zgłoszenia? W następnym kroku wpiszesz wyjaśnienie — trafi do gracza i do historii ticketów.'));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(
-    ...Object.entries(wyniki).map(([kod, w]) => przycisk(
+    ...Object.entries(wyniki).filter(([, w]) => !w.ukryty).map(([kod, w]) => przycisk(
       `ticket:wynik:${ticketId}:${kod}`, w.label,
       kod === 'udane' ? ButtonStyle.Success : kod === 'odrzucone' ? ButtonStyle.Danger : ButtonStyle.Secondary,
       w.emoji,
@@ -434,7 +451,7 @@ function kartaConfigu({ nazwaPliku, liczbaWpisow, podglad = null }) {
 
 // ---- List gończy -------------------------------------------------------
 
-function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null }) {
+function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null, nagrody = [] }) {
   const kolor = list.status === 'aktywny' ? kolory.ostrzezenie
     : list.status === 'zrealizowany' ? kolory.sukces
     : list.status === 'wygasly' ? kolory.neutralny
@@ -455,10 +472,19 @@ function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null }) {
     .addTextDisplayComponents(
       tekst(`**Poszukiwany:** \`${list.nick}\``),
       tekst(`**Powód:** ${list.powod}`),
-      tekst(`**Nagroda:** ${list.nagroda || 'brak'}`),
+      tekst(`**Nagroda:** ${list.nagroda || (nagrody.length ? '—' : 'brak')}`),
     )
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(glowaUrl));
   c.addSectionComponents(sec);
+
+  if (nagrody.length) {
+    const ostatnie = nagrody.slice(-10);
+    c.addTextDisplayComponents(tekst(
+      `**Dołożone nagrody (${nagrody.length}):**\n` +
+      (nagrody.length > ostatnie.length ? `-# …oraz ${nagrody.length - ostatnie.length} wcześniejszych\n` : '') +
+      ostatnie.map(n => `• ${n.nagroda} — <@${n.user_id}>`).join('\n')
+    ));
+  }
 
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
@@ -470,7 +496,41 @@ function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null }) {
     c.addSeparatorComponents(separator(false));
     c.addActionRowComponents(new ActionRowBuilder().addComponents(
       przycisk(`list:zglos:${list.id}`, 'Zgłoś zatrzymanie', ButtonStyle.Primary),
+      przycisk(`list:nagroda:${list.id}`, 'Dołóż nagrodę', ButtonStyle.Success, '💰'),
+      przycisk(`list:edytuj:${list.id}`, 'Edytuj', ButtonStyle.Secondary, '✏️'),
       przycisk(`list:zamknij:${list.id}`, 'Zamknij list', ButtonStyle.Danger),
+    ));
+  }
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaListyListow({ status, listy, total, strona, stron, guildId, czyStaff }) {
+  const tytuly = { aktywne: 'Aktywne listy gończe', oczekujace: 'Listy czekające na zatwierdzenie', zakonczone: 'Zakończone listy gończe' };
+  const c = kontener(status === 'aktywne' ? kolory.ostrzezenie : kolory.info);
+  c.addTextDisplayComponents(tekst(`## ${tytuly[status] || tytuly.aktywne}`));
+  c.addTextDisplayComponents(tekst(`-# Razem: ${total}${stron > 1 ? ` • strona ${strona} z ${stron}` : ''}`));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(listy.length
+    ? listy.map(l => {
+        const link = l.wiadomosc_id && l.kanal_id ? ` — [karta](https://discord.com/channels/${guildId}/${l.kanal_id}/${l.wiadomosc_id})` : '';
+        const nagroda = l.nagroda || l.dolozone ? `\n╰ 💰 ${l.nagroda || '—'}${l.dolozone ? ` (+${l.dolozone} dołożonych)` : ''}` : '';
+        const koniec = l.status === 'aktywny'
+          ? (l.wygasa ? ` • wygasa <t:${Math.floor(l.wygasa / 1000)}:R>` : ' • bez limitu czasu')
+          : ` • ${l.status}`;
+        return `\`#${l.id}\` **${l.nick}**${koniec}${link}\n╰ ${l.powod.slice(0, 90)}${l.powod.length > 90 ? '…' : ''}${nagroda}`;
+      }).join('\n')
+    : '_Brak listów w tej kategorii._'));
+  c.addSeparatorComponents(separator(false));
+  const przyciski = [
+    przycisk('listy:str:aktywne:1', 'Aktywne', status === 'aktywne' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    przycisk('listy:str:zakonczone:1', 'Zakończone', status === 'zakonczone' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+  ];
+  if (czyStaff) przyciski.push(przycisk('listy:str:oczekujace:1', 'Oczekujące', status === 'oczekujace' ? ButtonStyle.Primary : ButtonStyle.Secondary));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(...przyciski));
+  if (stron > 1) {
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      przycisk(`listy:str:${status}:${strona - 1}`, '‹ Poprzednia', ButtonStyle.Secondary, null, strona === 1),
+      przycisk(`listy:str:${status}:${strona + 1}`, 'Następna ›', ButtonStyle.Secondary, null, strona === stron),
     ));
   }
   return { components: [c], ...FLAGS_V2 };
@@ -572,16 +632,32 @@ function kartaWyroku({ sprawa }) {
   return { components: [c], ...FLAGS_V2 };
 }
 
+// ---- Powitania ---------------------------------------------------------
+
+function kartaPowitania({ userId, liczbaCzlonkow, kanalWeryfikacji = null, kanalTicketow = null }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst(`## Witaj w Sojuszu Narodów Zjednoczonych!`));
+  c.addSeparatorComponents(separator(true));
+  const kroki = [
+    kanalWeryfikacji ? `**1.** Zweryfikuj się na <#${kanalWeryfikacji}> — podaj swój nick z Minecrafta.` : '**1.** Zweryfikuj się, podając swój nick z Minecrafta.',
+    '**2.** Sprawdź państwa i ich graczy komendą `/sojusz-lista`.',
+    kanalTicketow ? `**3.** Masz sprawę do administracji? Otwórz zgłoszenie na <#${kanalTicketow}>.` : '**3.** Masz sprawę do administracji? Otwórz zgłoszenie.',
+  ];
+  c.addTextDisplayComponents(tekst(`<@${userId}>, jesteś naszym **${liczbaCzlonkow}.** członkiem.\n\n${kroki.join('\n')}`));
+  return { components: [c], ...FLAGS_V2 };
+}
+
 // ---- Wołanie moderatora ------------------------------------------------
 
-function kartaModCall({ user_id, kanal_id, waiting = true, przyjmujacy = null }) {
-  const c = kontener(waiting ? kolory.ostrzezenie : kolory.sukces);
-  c.addTextDisplayComponents(tekst(waiting ? '## Prośba o pomoc' : '## Prośba przyjęta'));
+function kartaModCall({ user_id, kanal_id, waiting = true, przyjmujacy = null, status = null }) {
+  const anulowane = !waiting && !przyjmujacy;
+  const c = kontener(waiting ? kolory.ostrzezenie : anulowane ? kolory.neutralny : kolory.sukces);
+  c.addTextDisplayComponents(tekst(waiting ? '## Prośba o pomoc' : anulowane ? '## Prośba nieaktualna' : '## Prośba przyjęta'));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Użytkownik:** <@${user_id}>\n` +
     `**Kanał:** <#${kanal_id}>\n` +
-    (przyjmujacy ? `**Obsługuje:** <@${przyjmujacy}>` : '**Status:** oczekuje na moderatora')
+    (przyjmujacy ? `**Obsługuje:** <@${przyjmujacy}>` : `**Status:** ${status || 'oczekuje na moderatora'}`)
   ));
   if (waiting) {
     c.addSeparatorComponents(separator(false));
@@ -619,12 +695,16 @@ function panelSelfrole(grupa, role) {
 
 // ---- Ostrzeżenia -------------------------------------------------------
 
-function kartaOstrzezen({ user_id, warny, avatar }) {
-  const c = kontener(warny.length ? kolory.ostrzezenie : kolory.sukces);
+function kartaOstrzezen({ user_id, warny, avatar, waznoscDni = 0, progi = null }) {
+  const aktywne = warny.filter(w => !w.nieaktywne).length;
+  const c = kontener(aktywne ? kolory.ostrzezenie : kolory.sukces);
   const sec = new SectionBuilder()
     .addTextDisplayComponents(
       tekst(`## Historia ostrzeżeń — <@${user_id}>`),
-      tekst(`**Aktywnych ostrzeżeń:** ${warny.length}`),
+      tekst(
+        `**Aktywnych ostrzeżeń:** ${aktywne} • **wszystkich:** ${warny.length}` +
+        (progi ? `\n-# Wyciszenie od ${progi.mute}, ban od ${progi.ban} aktywnych${waznoscDni > 0 ? ` • ostrzeżenie wygasa po ${waznoscDni} dniach` : ''}` : '')
+      ),
     )
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatar));
   c.addSectionComponents(sec);
@@ -633,7 +713,7 @@ function kartaOstrzezen({ user_id, warny, avatar }) {
     c.addTextDisplayComponents(tekst('_Użytkownik nie posiada ostrzeżeń._'));
   } else {
     const lista = warny.slice(0, 15).map(w =>
-      `\`#${w.id}\` <t:${Math.floor(w.data / 1000)}:d> • <@${w.wystawca_id}>\n╰ ${w.powod}`
+      `\`#${w.id}\` <t:${Math.floor(w.data / 1000)}:d> • <@${w.wystawca_id}>${w.nieaktywne ? ` • _nie liczy się (${w.nieaktywne})_` : ''}\n╰ ${w.powod}`
     ).join('\n\n');
     c.addTextDisplayComponents(tekst(lista));
   }
@@ -645,11 +725,11 @@ module.exports = {
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,
   panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
-  kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku,
+  kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku, kartaNarady,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
-  kartaListuGonczego, kartaZgloszeniaListu,
+  kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow,
   kartaSprawy, kartaWyroku,
-  kartaModCall,
+  kartaModCall, kartaPowitania,
   panelSelfrole,
   kartaOstrzezen,
 };

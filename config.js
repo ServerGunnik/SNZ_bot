@@ -10,6 +10,12 @@ module.exports = {
     logiTickety: process.env.KANAL_LOGI_TICKETY || process.env.KANAL_LOGI,
     // Historia zamkniętych ticketów (podsumowanie + transkrypt) - osobny kanał niż logi
     historiaTicketow: process.env.KANAL_HISTORIA_TICKETOW,
+    // Logi usuniętych i edytowanych wiadomości
+    logiWiadomosci: process.env.KANAL_LOGI_WIADOMOSCI || process.env.KANAL_LOGI,
+    // Kategoria dla kanałów narady administracji (domyślnie ta sama co tickety)
+    kategoriaNarady: process.env.KATEGORIA_NARADY || process.env.KATEGORIA_TICKETY,
+    // Powitania nowych członków (puste = wyłączone)
+    powitania: process.env.KANAL_POWITANIA,
     logiSad: process.env.KANAL_LOGI_SAD || process.env.KANAL_LOGI,
     logiPanstwa: process.env.KANAL_LOGI_PANSTWA || process.env.KANAL_LOGI,
     logiAntynuke: process.env.KANAL_LOGI_ANTYNUKE || process.env.KANAL_LOGI,
@@ -86,9 +92,17 @@ module.exports = {
       udane: { label: 'Udane / rozwiązane', emoji: '✅' },
       nieudane: { label: 'Nieudane / nierozwiązane', emoji: '❌' },
       odrzucone: { label: 'Odrzucone', emoji: '🚫' },
+      // ukryty: nie ma przycisku, ustawia go bot przy automatycznym zamknięciu
+      nieaktywne: { label: 'Zamknięte z powodu nieaktywności', emoji: '💤', ukryty: true },
     },
     ocenaTimeoutMs: 15 * 60 * 1000,
     minDlugoscWyjasnienia: 10,
+    // Przypomnienie dla staffu o nieprzejętym tickecie po tylu godzinach (0 = wyłączone)
+    przypomnienieGodz: 2,
+    // Brak wiadomości przez tyle godzin -> ostrzeżenie w tickecie (0 = bez automatycznego zamykania)
+    nieaktywnoscGodz: 48,
+    // ...a po kolejnych tylu godzinach bez odpowiedzi ticket zamyka się sam
+    zamkniecieGodzPoOstrzezeniu: 24,
   },
 
   panstwa: {
@@ -121,6 +135,10 @@ module.exports = {
       ban: 5,
     },
     dlugoscMuteMs: 60 * 60 * 1000,
+    // Po ilu dniach ostrzeżenie przestaje liczyć się do progów (0 = nigdy nie wygasa)
+    waznoscDni: 30,
+    // Czy ostrzeżenia z wyroków sądu liczą się do progów wyciszenia/bana
+    liczWyrokiSadu: false,
   },
 
   wolanieModa: {
@@ -138,6 +156,11 @@ module.exports = {
       kanalUsun: 3,
       kanalUtworz: 5,
       rolaUsun: 3,
+      // nadanie komuś roli z uprawnieniami administracyjnymi / dopisanie takich uprawnień do roli (każde jest od razu cofane)
+      nadanieUprawnien: 2,
+      webhook: 3,
+      uprawnieniaKanalow: 8,
+      serwer: 2,
     },
     // 'role' - odebranie wszystkich ról, 'kick' - wyrzucenie, 'ban' - ban
     kara: process.env.ANTYNUKE_KARA || 'role',
@@ -158,5 +181,29 @@ module.exports = {
     czasTrybuMs: 10 * 60 * 1000,
     // Konta młodsze niż tyle dni, które wbiły w trakcie fali, też są wyrzucane
     minWiekKontaDni: 7,
+  },
+
+  automod: {
+    wlaczony: process.env.AUTOMOD_WYLACZONY !== 'true',
+    // Flood: tyle wiadomości w oknie czasowym
+    flood: { wiadomosci: 6, oknoMs: 5000 },
+    // Te same treści powtórzone tyle razy w oknie
+    powtorzenia: { ile: 4, oknoMs: 30 * 1000 },
+    // Maksymalna liczba oznaczonych osób/ról w jednej wiadomości
+    maxOznaczen: 5,
+    // Próby @everyone / @here przez osoby spoza staffu
+    blokujEveryone: true,
+    // Zaproszenia na inne serwery Discord
+    blokujZaproszenia: true,
+    // Wyciszenie po naruszeniu (0 = tylko usunięcie wiadomości)
+    wyciszenieMs: 5 * 60 * 1000,
+    // ID kanałów bez automodu (oddzielone przecinkami)
+    pomijaneKanaly: (process.env.AUTOMOD_POMIJANE_KANALY || '').split(',').map(s => s.trim()).filter(Boolean),
+  },
+
+  kopie: {
+    // Kopia bazy przy starcie i co tyle godzin; tyle najnowszych kopii zostaje
+    coGodzin: 24,
+    zachowaj: 14,
   },
 };

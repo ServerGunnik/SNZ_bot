@@ -6,6 +6,7 @@ const db = require('../database/db.js');
 const config = require('../config.js');
 const { log, wyslij } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const { rolaAdministracyjna, maUprawnienia, UPRAWNIENIA_ADMINISTRACYJNE } = require('../utils/uprawnienia.js');
 
 const TYPY = {
   [AuditLogEvent.MemberBanAdd]: 'ban',
@@ -13,6 +14,11 @@ const TYPY = {
   [AuditLogEvent.ChannelDelete]: 'kanalUsun',
   [AuditLogEvent.ChannelCreate]: 'kanalUtworz',
   [AuditLogEvent.RoleDelete]: 'rolaUsun',
+  [AuditLogEvent.WebhookCreate]: 'webhook',
+  [AuditLogEvent.ChannelOverwriteCreate]: 'uprawnieniaKanalow',
+  [AuditLogEvent.ChannelOverwriteUpdate]: 'uprawnieniaKanalow',
+  [AuditLogEvent.ChannelOverwriteDelete]: 'uprawnieniaKanalow',
+  [AuditLogEvent.GuildUpdate]: 'serwer',
 };
 
 const NAZWY_TYPOW = {
@@ -21,6 +27,10 @@ const NAZWY_TYPOW = {
   kanalUsun: 'usuwanie kanałów',
   kanalUtworz: 'tworzenie kanałów',
   rolaUsun: 'usuwanie ról',
+  nadanieUprawnien: 'nadawanie uprawnień administracyjnych',
+  webhook: 'tworzenie webhooków',
+  uprawnieniaKanalow: 'zmiany uprawnień kanałów',
+  serwer: 'zmiany ustawień serwera',
 };
 
 const TYPY_KANALOW_DO_ODTWORZENIA = new Set([
@@ -194,6 +204,14 @@ async function przywroc(guild, lista) {
     const ok = kanal ? await kanal.delete('Antynuke: usunięcie spamowanego kanału').then(() => true).catch(() => false) : false;
     if (ok) wynik.usunieteKanaly++;
   }
+  for (const a of lista.filter(a => a.typ === 'webhook')) {
+    const webhook = await guild.client.fetchWebhook(a.targetId).catch(() => null);
+    if (webhook) await webhook.delete('Antynuke: webhook utworzony przez sprawcę').catch(() => {});
+  }
+  for (const a of lista.filter(a => a.typ === 'serwer')) {
+    const nazwa = a.zmiany?.find(z => z.key === 'name');
+    if (nazwa?.old) await guild.setName(nazwa.old, 'Antynuke: przywrócenie nazwy serwera').catch(() => {});
+  }
   wynik.odtworzoneKanaly = await odtworzKanaly(guild, lista.filter(a => a.typ === 'kanalUsun').map(a => a.targetId));
   wynik.odtworzoneRole = await odtworzRole(guild, lista.filter(a => a.typ === 'rolaUsun').map(a => a.targetId));
   return wynik;
@@ -240,6 +258,50 @@ async function ukarz(guild, sprawcaId, typ) {
   return wynikKary;
 }
 
+// ---- Nadawanie uprawnień administracyjnych -----------------------------
+// Osoba spoza whitelisty dała komuś rolę z uprawnieniami administracyjnymi albo dopisała je do roli:
+// zmiana jest cofana od razu (niezależnie od progu), a próba liczy się do kary.
+async function cofnijNadanieUprawnien(wpis, guild) {
+  if (wpis.action === AuditLogEvent.MemberRoleUpdate) {
+    const dodane = (wpis.changes || []).filter(z => z.key === '$add').flatMap(z => z.new || []);
+    const niebezpieczne = dodane.map(r => guild.roles.cache.get(r.id)).filter(rolaAdministracyjna);
+    if (!niebezpieczne.length) return false;
+    const czlonek = await guild.members.fetch(wpis.targetId).catch(() => null);
+    const ok = czlonek
+      ? await czlonek.roles.remove(niebezpieczne, 'Antynuke: nadanie roli administracyjnej przez osobę spoza whitelisty').then(() => true).catch(() => false)
+      : false;
+    await log(guild.client, {
+      tytul: 'Antynuke — cofnięto nadanie roli administracyjnej',
+      opis: `**Nadał:** <@${wpis.executorId}>\n**Komu:** <@${wpis.targetId}>\n**Role:** ${niebezpieczne.map(r => `<@&${r.id}>`).join(', ')}\n**Cofnięto:** ${ok ? 'tak' : 'nie (bot ma za niską rolę?)'}`,
+      kolor: kolory.blad,
+      kanal: 'logiAntynuke',
+      stopka: 'Jeśli to było zamierzone, dodaj tę osobę do whitelisty (/antynuke whitelist-dodaj).',
+    });
+    return true;
+  }
+  if (wpis.action === AuditLogEvent.RoleUpdate) {
+    const zmiana = (wpis.changes || []).find(z => z.key === 'permissions');
+    if (!zmiana) return false;
+    const stare = BigInt(zmiana.old ?? 0);
+    const nowe = BigInt(zmiana.new ?? 0);
+    const dopisane = UPRAWNIENIA_ADMINISTRACYJNE.filter(p => (nowe & p) === p && (stare & p) !== p);
+    if (!dopisane.length || !maUprawnienia(nowe, UPRAWNIENIA_ADMINISTRACYJNE)) return false;
+    const rola = guild.roles.cache.get(wpis.targetId);
+    const ok = rola
+      ? await rola.setPermissions(stare, 'Antynuke: dopisanie uprawnień administracyjnych przez osobę spoza whitelisty').then(() => true).catch(() => false)
+      : false;
+    await log(guild.client, {
+      tytul: 'Antynuke — cofnięto nadanie uprawnień roli',
+      opis: `**Zmienił:** <@${wpis.executorId}>\n**Rola:** <@&${wpis.targetId}>\n**Cofnięto:** ${ok ? 'tak' : 'nie (rola wyżej niż rola bota?)'}`,
+      kolor: kolory.blad,
+      kanal: 'logiAntynuke',
+      stopka: 'Jeśli to było zamierzone, dodaj tę osobę do whitelisty (/antynuke whitelist-dodaj).',
+    });
+    return true;
+  }
+  return false;
+}
+
 // ---- Obsługa zdarzeń ---------------------------------------------------
 
 async function obsluzWpisAudytu(wpis, guild) {
@@ -265,12 +327,13 @@ async function obsluzWpisAudytu(wpis, guild) {
     return;
   }
 
-  const typ = TYPY[wpis.action];
+  const cofniete = await cofnijNadanieUprawnien(wpis, guild);
+  const typ = cofniete ? 'nadanieUprawnien' : TYPY[wpis.action];
   if (!typ) return;
   if (typ === 'kanalUsun' && wpis.target && typeof wpis.target.isThread === 'function') zapamietajKanal(wpis.target);
 
   const teraz = Date.now();
-  const akcja = { typ, targetId: wpis.targetId, czas: teraz };
+  const akcja = { typ, targetId: wpis.targetId, czas: teraz, zmiany: wpis.changes };
 
   // Sprawca już ukarany - każdą kolejną akcję cofamy od razu
   const ukaranyO = ukarani.get(sprawcaId);
@@ -345,31 +408,36 @@ async function wyrzucRaidera(member, powod) {
   return member.kick(powod).then(() => true).catch(() => false);
 }
 
+// Zwraca true, jeśli nowy członek został wyrzucony przez anty-raid
 async function obsluzDolaczenie(member) {
-  if (!config.antyraid.wlaczony || member.user.bot) return;
-  if (config.guildId && member.guild.id !== config.guildId) return;
+  if (!config.antyraid.wlaczony || member.user.bot) return false;
+  if (config.guildId && member.guild.id !== config.guildId) return false;
   const client = member.client;
   const teraz = Date.now();
 
   if (trybRaiduAktywny()) {
     await wyrzucRaidera(member, 'Anty-raid: serwer w trybie ochrony');
-    return;
+    return true;
   }
 
   const minWiekMs = config.antyraid.minWiekKontaDni * 24 * 60 * 60 * 1000;
   dolaczenia.push({ id: member.id, czas: teraz, mlodeKonto: teraz - member.user.createdTimestamp < minWiekMs });
   while (dolaczenia.length && teraz - dolaczenia[0].czas > config.antyraid.oknoMs) dolaczenia.shift();
 
-  if (dolaczenia.length < config.antyraid.progDolaczen) return;
+  if (dolaczenia.length < config.antyraid.progDolaczen) return false;
 
   // Wykryto falę dołączeń
   const fala = dolaczenia.splice(0);
   ustawTrybRaidu(client, true);
 
   let wyrzuceni = 0;
+  let wyrzuconyTen = false;
   for (const d of fala.filter(d => d.mlodeKonto)) {
     const m = await member.guild.members.fetch(d.id).catch(() => null);
-    if (m && await wyrzucRaidera(m, 'Anty-raid: młode konto w fali dołączeń')) wyrzuceni++;
+    if (m && await wyrzucRaidera(m, 'Anty-raid: młode konto w fali dołączeń')) {
+      wyrzuceni++;
+      if (d.id === member.id) wyrzuconyTen = true;
+    }
   }
 
   await log(client, {
@@ -383,6 +451,7 @@ async function obsluzDolaczenie(member) {
     kanal: 'logiAntynuke',
   });
   await pingStaffu(client, '— **wykryto raid**, serwer przeszedł w tryb ochrony.');
+  return wyrzuconyTen;
 }
 
 function status() {

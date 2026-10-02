@@ -13,5 +13,9 @@ module.exports = {
     // Zaplanuj cykliczne zadania
     const { uruchomZadaniaCykliczne } = require('../modules/listy-goncze.js');
     uruchomZadaniaCykliczne(client);
+    require('../modules/tickety.js').uruchomZadaniaTicketow(client);
+    require('../modules/kopie.js').uruchomKopie();
+    await require('../modules/wolanie-moda.js').przywrocWezwania(client)
+      .catch((e) => console.error('[ready] przywracanie wezwań', e));
   },
 };
