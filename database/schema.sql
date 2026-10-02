@@ -123,6 +123,10 @@ CREATE TABLE IF NOT EXISTS listy_zgloszenia (
   list_id INTEGER NOT NULL,
   zglaszajacy_id TEXT NOT NULL,
   dowod TEXT NOT NULL,
+  link TEXT,
+  kanal_id TEXT,      -- kanał administracji do rozpatrzenia zgłoszenia
+  wiadomosc_id TEXT,  -- karta zgłoszenia z przyciskami
+  zglaszajacy_dodany INTEGER DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'oczekuje', -- oczekuje, zatwierdzone, odrzucone
   utworzone INTEGER NOT NULL,
   rozpatrzone INTEGER,
@@ -135,7 +139,7 @@ CREATE TABLE IF NOT EXISTS sprawy (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   numer TEXT NOT NULL UNIQUE,
   pozywajacy_id TEXT NOT NULL,
-  pozwany_typ TEXT NOT NULL, -- 'nick' | 'panstwo'
+  pozwany_typ TEXT NOT NULL, -- 'gracz' (ID Discord) | 'panstwo' (nazwa) | 'nick' (stare sprawy)
   pozwany_wartosc TEXT NOT NULL,
   zarzut TEXT NOT NULL,
   opis TEXT NOT NULL,

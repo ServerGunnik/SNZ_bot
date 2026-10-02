@@ -1,5 +1,6 @@
 const {
   MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
+  LabelBuilder, FileUploadBuilder, AttachmentBuilder, ChannelType, PermissionFlagsBits,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
@@ -7,6 +8,7 @@ const karty = require('../utils/karty.js');
 const { glowaUrl } = require('../utils/minecraft.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
 const { log, wyslij } = require('../utils/logger.js');
+const { transkrypt } = require('../utils/transkrypt.js');
 const kolory = require('../utils/kolory.js');
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
@@ -28,7 +30,10 @@ const q = {
   },
   liczbaNagrod: db.prepare('SELECT list_id, COUNT(*) c FROM listy_nagrody GROUP BY list_id'),
   aktywnyNaNick: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' AND nick = ? COLLATE NOCASE ORDER BY id DESC LIMIT 1"),
-  wstawZgloszenie: db.prepare('INSERT INTO listy_zgloszenia (list_id, zglaszajacy_id, dowod, utworzone) VALUES (?, ?, ?, ?)'),
+  wstawZgloszenie: db.prepare('INSERT INTO listy_zgloszenia (list_id, zglaszajacy_id, dowod, link, utworzone) VALUES (?, ?, ?, ?, ?)'),
+  oczekujaceZgloszenieUsera: db.prepare("SELECT * FROM listy_zgloszenia WHERE list_id = ? AND zglaszajacy_id = ? AND status = 'oczekuje'"),
+  zapiszKanalZgloszenia: db.prepare('UPDATE listy_zgloszenia SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
+  zglaszajacyDodany: db.prepare('UPDATE listy_zgloszenia SET zglaszajacy_dodany = 1 WHERE id = ?'),
   zgloszenie: db.prepare('SELECT * FROM listy_zgloszenia WHERE id = ?'),
   aktualizujZgloszenie: db.prepare("UPDATE listy_zgloszenia SET status = ?, rozpatrzone = ?, rozpatrzyl = ? WHERE id = ?"),
 };
@@ -93,62 +98,181 @@ function aktywnyListNaNick(nick) {
 
 // Handlery interakcji
 
+// ---- Zgłoszenie zatrzymania (realizacja listu) -------------------------
+// Gracz opisuje zatrzymanie i dołącza plik (zdjęcie/nagranie) + opcjonalny link.
+// Powstaje kanał widoczny tylko dla administracji; administracja może dodać do niego zgłaszającego.
+
+const LIMIT_PLIKU = 10 * 1024 * 1024; // limit wysyłki plików przez bota na serwerze bez boosta
+
 async function onZglos(interaction) {
   const [, , idStr] = interaction.customId.split(':');
-  const modal = new ModalBuilder().setCustomId(`list:zglos-modal:${idStr}`).setTitle('Zgłoszenie zatrzymania');
-  modal.addComponents(new ActionRowBuilder().addComponents(
-    new TextInputBuilder().setCustomId('dowod').setLabel('Dowód (opis + link do screena)')
-      .setStyle(TextInputStyle.Paragraph).setMinLength(10).setMaxLength(1500).setRequired(true)
-  ));
+  const list = q.poId.get(parseInt(idStr, 10));
+  if (!list || list.status !== 'aktywny') {
+    return interaction.reply({ ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'), flags: EPHEMERAL_V2 });
+  }
+  const oczekujace = q.oczekujaceZgloszenieUsera.get(list.id, interaction.user.id);
+  if (oczekujace) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Zgłoszenie w trakcie', 'Twoje zgłoszenie do tego listu czeka już na decyzję administracji.'), flags: EPHEMERAL_V2 });
+  }
+  const modal = new ModalBuilder().setCustomId(`list:zglos-modal:${list.id}`).setTitle(`Zatrzymanie — ${list.nick}`.slice(0, 45));
+  modal.addLabelComponents(
+    new LabelBuilder().setLabel('Opis zatrzymania')
+      .setDescription('Gdzie, kiedy i jak zatrzymałeś poszukiwanego?')
+      .setTextInputComponent(new TextInputBuilder().setCustomId('opis').setStyle(TextInputStyle.Paragraph)
+        .setMinLength(10).setMaxLength(1500).setRequired(true)),
+    new LabelBuilder().setLabel('Dowód — zdjęcie lub nagranie')
+      .setDescription('Wymagany co najmniej 1 plik (maks. 5)')
+      .setFileUploadComponent(new FileUploadBuilder().setCustomId('pliki').setMinValues(1).setMaxValues(5).setRequired(true)),
+    new LabelBuilder().setLabel('Link do nagrania (opcjonalnie)')
+      .setDescription('Np. YouTube, gdy nagranie jest za duże na Discorda')
+      .setTextInputComponent(new TextInputBuilder().setCustomId('link').setStyle(TextInputStyle.Short)
+        .setMaxLength(300).setRequired(false)),
+  );
   await interaction.showModal(modal);
+}
+
+// Pobiera pliki z formularza i wysyła je ponownie (linki z formularza po czasie wygasają)
+async function przygotujDowody(zalaczniki) {
+  const pliki = [];
+  const zaDuze = [];
+  for (const z of zalaczniki) {
+    if (z.size > LIMIT_PLIKU) { zaDuze.push(z); continue; }
+    const dane = await fetch(z.url).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+    if (!dane) { zaDuze.push(z); continue; }
+    const nazwa = `dowod-${pliki.length + 1}-${z.name}`.replace(/[^\w.-]/g, '_').slice(0, 90);
+    pliki.push({ zalacznik: new AttachmentBuilder(Buffer.from(dane), { name: nazwa }), nazwa, typ: z.contentType || '' });
+  }
+  return { pliki, zaDuze };
 }
 
 async function onZglosModal(interaction) {
   const [, , idStr] = interaction.customId.split(':');
-  const id = parseInt(idStr, 10);
-  const list = q.poId.get(id);
+  const list = q.poId.get(parseInt(idStr, 10));
   if (!list || list.status !== 'aktywny') {
-    return interaction.reply({
-      ...karty.kartaBlad('List zamknięty', 'Ten list nie jest już aktywny.'),
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-    });
+    return interaction.reply({ ...karty.kartaBlad('List zamknięty', 'Ten list nie jest już aktywny.'), flags: EPHEMERAL_V2 });
   }
-  const dowod = interaction.fields.getTextInputValue('dowod').trim();
-  const info = q.wstawZgloszenie.run(id, interaction.user.id, dowod, Date.now());
-  const zgloszenie = q.zgloszenie.get(info.lastInsertRowid);
-  await wyslij(interaction.client, config.kanaly.logi, karty.kartaZgloszeniaListu({ list, zgloszenie }));
-  await interaction.reply({
-    ...karty.kartaSukces('Zgłoszenie wysłane', 'Staff rozpatrzy Twoje zgłoszenie.'),
-    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+  if (q.oczekujaceZgloszenieUsera.get(list.id, interaction.user.id)) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Zgłoszenie w trakcie', 'Twoje zgłoszenie do tego listu czeka już na decyzję administracji.'), flags: EPHEMERAL_V2 });
+  }
+  const opis = interaction.fields.getTextInputValue('opis').trim();
+  const link = (interaction.fields.getTextInputValue('link') || '').trim() || null;
+  const zalaczniki = [...(interaction.fields.getUploadedFiles('pliki', true)?.values() || [])];
+  if (!zalaczniki.length) {
+    return interaction.reply({ ...karty.kartaBlad('Brak dowodu', 'Dołącz co najmniej jedno zdjęcie lub nagranie.'), flags: EPHEMERAL_V2 });
+  }
+  if (link && !/^https?:\/\/\S+$/i.test(link)) {
+    return interaction.reply({ ...karty.kartaBlad('Nieprawidłowy link', 'Link musi zaczynać się od http:// lub https://.'), flags: EPHEMERAL_V2 });
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const zgloszenieId = q.wstawZgloszenie.run(list.id, interaction.user.id, opis, link, Date.now()).lastInsertRowid;
+
+  // Kanał tylko dla administracji (i bota)
+  const staff = config.role.staff;
+  const kanal = await interaction.guild.channels.create({
+    name: `zatrzymanie-${list.nick}-${zgloszenieId}`.toLowerCase().slice(0, 90),
+    type: ChannelType.GuildText,
+    parent: config.kanaly.kategoriaNarady || null,
+    topic: `Zgłoszenie zatrzymania #${zgloszenieId} — list gończy #${list.id} (${list.nick}). Zgłaszający nie widzi kanału, dopóki administracja go nie doda.`,
+    permissionOverwrites: [
+      { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels] },
+      ...(staff ? [{ id: staff, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] }] : []),
+    ],
   });
+
+  const zgloszenie = q.zgloszenie.get(zgloszenieId);
+  if (staff) await kanal.send({ content: `<@&${staff}> nowe zgłoszenie zatrzymania do rozpatrzenia.`, allowedMentions: { roles: [staff] } }).catch(() => null);
+  const karta = await kanal.send({ ...karty.kartaZgloszeniaListu({ list, zgloszenie }), allowedMentions: { parse: [] } });
+  q.zapiszKanalZgloszenia.run(kanal.id, karta.id, zgloszenieId);
+
+  // Dowody w osobnej wiadomości (karta z przyciskami jest później edytowana)
+  const { pliki, zaDuze } = await przygotujDowody(zalaczniki);
+  await kanal.send({
+    ...karty.kartaDowodowZatrzymania({
+      pliki: pliki.map(p => ({ nazwa: p.nazwa, typ: p.typ })),
+      linki: [...zaDuze.map(z => `[${z.name}](${z.url}) _(za duży do przesłania — link może wygasnąć)_`), ...(link ? [link] : [])],
+    }),
+    files: pliki.map(p => p.zalacznik),
+    allowedMentions: { parse: [] },
+  }).catch((e) => {
+    console.error('[listy-goncze] dowody', e.message);
+    return kanal.send(karty.kartaOstrzezenie('Nie udało się przesłać dowodów', zalaczniki.map(z => z.url).join('\n'))).catch(() => null);
+  });
+
+  await log(interaction.client, {
+    tytul: 'Zgłoszenie zatrzymania',
+    opis: `**List:** #${list.id} — \`${list.nick}\`\n**Zgłaszający:** <@${interaction.user.id}>\n**Kanał:** <#${kanal.id}>`,
+    kolor: kolory.info,
+  });
+  await interaction.editReply(karty.kartaSukces('Zgłoszenie wysłane',
+    'Administracja sprawdzi Twój dowód. Jeśli będzie potrzebować więcej szczegółów, doda Cię do kanału zgłoszenia.'));
+}
+
+async function onDodajZglaszajacego(interaction) {
+  if (!jestStaff(interaction.member)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Tylko administracja.'), flags: EPHEMERAL_V2 });
+  }
+  const [, , idStr] = interaction.customId.split(':');
+  const zgloszenie = q.zgloszenie.get(parseInt(idStr, 10));
+  if (!zgloszenie || zgloszenie.status !== 'oczekuje' || !zgloszenie.kanal_id) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Już rozpatrzone', 'To zgłoszenie jest już zamknięte.'), flags: EPHEMERAL_V2 });
+  }
+  const ok = await interaction.channel.permissionOverwrites.edit(zgloszenie.zglaszajacy_id, {
+    ViewChannel: true, SendMessages: true, AttachFiles: true, ReadMessageHistory: true,
+  }, { reason: `Zgłoszenie zatrzymania #${zgloszenie.id}: dodał ${interaction.user.tag}` }).then(() => true).catch(() => false);
+  if (!ok) return interaction.reply({ ...karty.kartaBlad('Błąd uprawnień', 'Bot nie może zmienić uprawnień tego kanału.'), flags: EPHEMERAL_V2 });
+
+  q.zglaszajacyDodany.run(zgloszenie.id);
+  const list = q.poId.get(zgloszenie.list_id);
+  await interaction.update({ ...karty.kartaZgloszeniaListu({ list, zgloszenie: q.zgloszenie.get(zgloszenie.id) }), allowedMentions: { parse: [] } });
+  await interaction.channel.send({
+    content: `<@${zgloszenie.zglaszajacy_id}>, administracja ma pytania do Twojego zgłoszenia zatrzymania — odpowiedz tutaj.`,
+    allowedMentions: { users: [zgloszenie.zglaszajacy_id] },
+  }).catch(() => null);
 }
 
 async function onZglosDecyzja(interaction) {
   if (!jestStaff(interaction.member)) {
-    return interaction.reply({
-      ...karty.kartaBlad('Brak uprawnień', 'Tylko staff.'),
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-    });
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Tylko staff.'), flags: EPHEMERAL_V2 });
   }
   const [, , decyzja, idStr] = interaction.customId.split(':');
   const zgloszenie = q.zgloszenie.get(parseInt(idStr, 10));
   if (!zgloszenie || zgloszenie.status !== 'oczekuje') {
-    return interaction.reply({
-      ...karty.kartaOstrzezenie('Już rozpatrzone', 'Ktoś już zajął się tym zgłoszeniem.'),
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-    });
+    return interaction.reply({ ...karty.kartaOstrzezenie('Już rozpatrzone', 'Ktoś już zajął się tym zgłoszeniem.'), flags: EPHEMERAL_V2 });
   }
-  const noweStatus = decyzja === 'ok' ? 'zatwierdzone' : 'odrzucone';
+  const zatwierdzone = decyzja === 'ok';
+  const noweStatus = zatwierdzone ? 'zatwierdzone' : 'odrzucone';
   q.aktualizujZgloszenie.run(noweStatus, Date.now(), interaction.user.id, zgloszenie.id);
-
-  if (decyzja === 'ok' && q.poId.get(zgloszenie.list_id)?.status === 'aktywny') {
+  const list = q.poId.get(zgloszenie.list_id);
+  if (zatwierdzone && list?.status === 'aktywny') {
     await zamknijList(interaction.client, zgloszenie.list_id, 'zrealizowany', interaction.user.id);
   }
 
-  await interaction.update({
-    ...karty.kartaSukces('Rozpatrzone', `Zgłoszenie #${zgloszenie.id} → **${noweStatus}**.`),
-    flags: MessageFlags.IsComponentsV2,
-  });
+  await interaction.update({ ...karty.kartaZgloszeniaListu({ list: q.poId.get(zgloszenie.list_id) || list, zgloszenie: q.zgloszenie.get(zgloszenie.id) }), allowedMentions: { parse: [] } });
+
+  const user = await interaction.client.users.fetch(zgloszenie.zglaszajacy_id).catch(() => null);
+  if (user) {
+    await user.send(zatwierdzone
+      ? karty.kartaSukces('Zatrzymanie zatwierdzone', `Twoje zgłoszenie zatrzymania \`${list?.nick || '?'}\` (list #${zgloszenie.list_id}) zostało zatwierdzone. Zgłoś się po nagrodę do wystawcy listu.`)
+      : karty.kartaBlad('Zatrzymanie odrzucone', `Twoje zgłoszenie zatrzymania \`${list?.nick || '?'}\` (list #${zgloszenie.list_id}) zostało odrzucone przez administrację.`)).catch(() => null);
+  }
+
+  // Kanał zgłoszenia: transkrypt do logów i usunięcie
+  if (zgloszenie.kanal_id && interaction.channel?.id === zgloszenie.kanal_id) {
+    const zal = await transkrypt(interaction.channel).catch(() => null);
+    await wyslij(interaction.client, config.kanaly.logi, {
+      ...karty.kartaInfo({
+        tytul: `Zgłoszenie zatrzymania #${zgloszenie.id} — ${noweStatus}`,
+        opis: `**List:** #${zgloszenie.list_id} — \`${list?.nick || '?'}\`\n**Zgłaszający:** <@${zgloszenie.zglaszajacy_id}>\n**Rozpatrzył:** <@${interaction.user.id}>`,
+        kolor: zatwierdzone ? kolory.sukces : kolory.blad,
+      }),
+      allowedMentions: { parse: [] },
+      ...(zal ? { files: [zal] } : {}),
+    });
+    await interaction.channel.send(karty.kartaInfo({ tytul: 'Zgłoszenie rozpatrzone', opis: 'Kanał zostanie usunięty za 10 sekund.' })).catch(() => null);
+    setTimeout(() => interaction.channel.delete('Zgłoszenie zatrzymania rozpatrzone').catch(() => null), 10000);
+  }
 }
 
 async function onZamknij(interaction) {
@@ -325,6 +449,7 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('list:zglos', onZglos);
   zarejestruj('list:zglos-modal', onZglosModal);
   zarejestruj('list:zgl', onZglosDecyzja);
+  zarejestruj('list:zgl-dodaj', onDodajZglaszajacego);
   zarejestruj('list:zamknij', onZamknij);
   zarejestruj('list:nagroda', onNagroda);
   zarejestruj('list:nagroda-modal', onNagrodaModal);

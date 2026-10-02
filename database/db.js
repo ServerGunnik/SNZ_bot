@@ -29,6 +29,11 @@ dodajKolumne('tickety', 'narada_id', 'TEXT');
 for (const k of ['ostatnia_aktywnosc', 'przypomniano', 'ostrzezono_nieaktywnosc']) dodajKolumne('tickety', k, 'INTEGER');
 dodajKolumne('mod_call', 'pomoc_kanal_id', 'TEXT');
 dodajKolumne('mod_call', 'sprzatniete', 'INTEGER DEFAULT 0');
+for (const k of ['link', 'kanal_id', 'wiadomosc_id']) dodajKolumne('listy_zgloszenia', k, 'TEXT');
+dodajKolumne('listy_zgloszenia', 'zglaszajacy_dodany', 'INTEGER DEFAULT 0');
+
+// Odwołania zostały wyłączone - sprawy w toku odwołania wracają do sędziego albo do kolejki
+db.exec(`UPDATE sprawy SET status = CASE WHEN sedzia_id IS NULL THEN 'zlozona' ELSE 'w_toku' END WHERE status = 'odwolanie'`);
 dodajKolumne('panstwa', 'sojusznik', 'INTEGER NOT NULL DEFAULT 1');
 dodajKolumne('panstwa_czlonkowie', 'status', "TEXT NOT NULL DEFAULT 'czlonek'");
 
