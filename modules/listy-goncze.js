@@ -31,6 +31,7 @@ const q = {
   liczbaNagrod: db.prepare('SELECT list_id, COUNT(*) c FROM listy_nagrody GROUP BY list_id'),
   aktywnyNaNick: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' AND nick = ? COLLATE NOCASE ORDER BY id DESC LIMIT 1"),
   wstawZgloszenie: db.prepare('INSERT INTO listy_zgloszenia (list_id, zglaszajacy_id, dowod, link, utworzone) VALUES (?, ?, ?, ?, ?)'),
+  oczekujaceZKanalem: db.prepare("SELECT * FROM listy_zgloszenia WHERE status = 'oczekuje' AND kanal_id IS NOT NULL AND wiadomosc_id IS NOT NULL"),
   oczekujaceZgloszenieUsera: db.prepare("SELECT * FROM listy_zgloszenia WHERE list_id = ? AND zglaszajacy_id = ? AND status = 'oczekuje'"),
   zapiszKanalZgloszenia: db.prepare('UPDATE listy_zgloszenia SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   zglaszajacyDodany: db.prepare('UPDATE listy_zgloszenia SET zglaszajacy_dodany = 1 WHERE id = ?'),
@@ -181,9 +182,10 @@ async function onZglosModal(interaction) {
     ],
   });
 
-  const zgloszenie = q.zgloszenie.get(zgloszenieId);
+  // Kanał zapisany PRZED wysłaniem karty - od niego zależy przycisk "Dodaj zgłaszającego"
+  q.zapiszKanalZgloszenia.run(kanal.id, null, zgloszenieId);
   if (staff) await kanal.send({ content: `<@&${staff}> nowe zgłoszenie zatrzymania do rozpatrzenia.`, allowedMentions: { roles: [staff] } }).catch(() => null);
-  const karta = await kanal.send({ ...karty.kartaZgloszeniaListu({ list, zgloszenie }), allowedMentions: { parse: [] } });
+  const karta = await kanal.send({ ...karty.kartaZgloszeniaListu({ list, zgloszenie: q.zgloszenie.get(zgloszenieId) }), allowedMentions: { parse: [] } });
   q.zapiszKanalZgloszenia.run(kanal.id, karta.id, zgloszenieId);
 
   // Dowody w osobnej wiadomości (karta z przyciskami jest później edytowana)
@@ -432,6 +434,16 @@ async function onEdytujModal(interaction) {
   });
 }
 
+// Po starcie: odświeżenie kart oczekujących zgłoszeń (np. dodanie przycisków z nowszej wersji bota)
+async function odswiezKartyZgloszen(client) {
+  for (const zgloszenie of q.oczekujaceZKanalem.all()) {
+    const kanal = await client.channels.fetch(zgloszenie.kanal_id).catch(() => null);
+    const wiad = kanal && await kanal.messages.fetch(zgloszenie.wiadomosc_id).catch(() => null);
+    const list = q.poId.get(zgloszenie.list_id);
+    if (wiad && list) await wiad.edit({ ...karty.kartaZgloszeniaListu({ list, zgloszenie }), allowedMentions: { parse: [] } }).catch(() => null);
+  }
+}
+
 // Cykliczne wygasanie
 
 function uruchomZadaniaCykliczne(client) {
@@ -468,4 +480,5 @@ module.exports = {
   aktualizujWiadomosc,
   kartaListuDoWiadomosci,
   uruchomZadaniaCykliczne,
+  odswiezKartyZgloszen,
 };

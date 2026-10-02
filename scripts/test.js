@@ -308,6 +308,8 @@ const karty = wymagaj('utils/karty.js');
   const zgl = db.prepare('SELECT * FROM listy_zgloszenia WHERE zglaszajacy_id = ?').get('LOWCA');
   sprawdz(zgl && zgl.kanal_id && kanaly.size === przed + 1, 'powstał kanał zgłoszenia dla administracji');
   sprawdz(zgl && zgl.link === 'https://youtu.be/abc', 'zapisano link do nagrania');
+  const kartaZgl = zgl && kanaly.get(zgl.kanal_id).wyslane.find(p => p.components && JSON.stringify(p.components[0].toJSON()).includes('list:zgl:ok'));
+  sprawdz(kartaZgl && JSON.stringify(kartaZgl.components[0].toJSON()).includes(`list:zgl-dodaj:${zgl.id}`), 'karta zgłoszenia ma przycisk „Dodaj zgłaszającego”');
   await bezpiecznie('dodanie zgłaszającego', () => znajdz(`list:zgl-dodaj:${zgl.id}`)(atrapa(`list:zgl-dodaj:${zgl.id}`, staff, { channel: kanaly.get(zgl.kanal_id) })));
   sprawdz(db.prepare('SELECT zglaszajacy_dodany FROM listy_zgloszenia WHERE id = ?').get(zgl.id).zglaszajacy_dodany === 1, 'zgłaszający dodany do kanału');
   await bezpiecznie('zatwierdzenie', () => znajdz(`list:zgl:ok:${zgl.id}`)(atrapa(`list:zgl:ok:${zgl.id}`, staff, { channel: kanaly.get(zgl.kanal_id) })));
