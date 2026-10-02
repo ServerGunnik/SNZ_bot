@@ -5,6 +5,7 @@ module.exports = {
   once: true,
   async execute(client) {
     console.log(`Zalogowano jako ${client.user.tag}`);
+    console.log(`[SNZ] Wersja kodu: ${require('../utils/wersja.js').wersjaKodu()}`);
     client.user.setPresence({
       activities: [{ name: 'Sojusz Narodów Zjednoczonych', type: ActivityType.Watching }],
       status: 'online',

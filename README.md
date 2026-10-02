@@ -54,6 +54,7 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 - `/historia-ticketow <gracz>` — historia zgłoszeń gracza z linkami do wpisów w historii.
 - `/statystyki-ticketow [dni]` — liczba zgłoszeń, kategorie, wyniki, średni czas obsługi i ocena, ranking administracji.
 - `/ticket dodaj|usun <osoba>` — dodanie/usunięcie osoby z bieżącego ticketu.
+- `/zatrzymanie dodaj-zglaszajacego` — na kanale zgłoszenia zatrzymania wpuszcza zgłaszającego (to samo co przycisk na karcie).
 - `/antynuke status|whitelist-lista|raid` — stan ochrony, whitelista, ręczny tryb anty-raid.
 - `/antynuke whitelist-dodaj|whitelist-usun` — tylko właściciel serwera.
 
