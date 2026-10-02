@@ -35,6 +35,7 @@ const q = {
   oczekujaceZgloszenieUsera: db.prepare("SELECT * FROM listy_zgloszenia WHERE list_id = ? AND zglaszajacy_id = ? AND status = 'oczekuje'"),
   zapiszKanalZgloszenia: db.prepare('UPDATE listy_zgloszenia SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   zglaszajacyDodany: db.prepare('UPDATE listy_zgloszenia SET zglaszajacy_dodany = 1 WHERE id = ?'),
+  zgloszenieNaKanale: db.prepare('SELECT * FROM listy_zgloszenia WHERE kanal_id = ?'),
   zgloszenie: db.prepare('SELECT * FROM listy_zgloszenia WHERE id = ?'),
   aktualizujZgloszenie: db.prepare("UPDATE listy_zgloszenia SET status = ?, rozpatrzone = ?, rozpatrzyl = ? WHERE id = ?"),
 };
@@ -211,27 +212,51 @@ async function onZglosModal(interaction) {
     'Administracja sprawdzi Twój dowód. Jeśli będzie potrzebować więcej szczegółów, doda Cię do kanału zgłoszenia.'));
 }
 
+// Wpuszcza zgłaszającego na kanał zgłoszenia (przycisk na karcie albo /zatrzymanie dodaj-zglaszajacego).
+// Zwraca null przy sukcesie albo opis błędu.
+async function dodajZglaszajacego(kanal, zgloszenie, przezTag) {
+  if (!zgloszenie || zgloszenie.status !== 'oczekuje' || !zgloszenie.kanal_id) return 'To zgłoszenie jest już zamknięte.';
+  const ok = await kanal.permissionOverwrites.edit(zgloszenie.zglaszajacy_id, {
+    ViewChannel: true, SendMessages: true, AttachFiles: true, ReadMessageHistory: true,
+  }, { reason: `Zgłoszenie zatrzymania #${zgloszenie.id}: dodał ${przezTag}` }).then(() => true).catch((e) => {
+    console.error('[listy-goncze] dodanie zgłaszającego', e.message);
+    return false;
+  });
+  if (!ok) return 'Bot nie może zmienić uprawnień tego kanału (potrzebuje uprawnienia „Zarządzanie kanałami”).';
+  q.zglaszajacyDodany.run(zgloszenie.id);
+  await kanal.send({
+    content: `<@${zgloszenie.zglaszajacy_id}>, administracja ma pytania do Twojego zgłoszenia zatrzymania — odpowiedz tutaj.`,
+    allowedMentions: { users: [zgloszenie.zglaszajacy_id] },
+  }).catch(() => null);
+  return null;
+}
+
+function kartaZgloszeniaPoId(id) {
+  const zgloszenie = q.zgloszenie.get(id);
+  const list = zgloszenie && q.poId.get(zgloszenie.list_id);
+  return list ? { ...karty.kartaZgloszeniaListu({ list, zgloszenie }), allowedMentions: { parse: [] } } : null;
+}
+
 async function onDodajZglaszajacego(interaction) {
   if (!jestStaff(interaction.member)) {
     return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Tylko administracja.'), flags: EPHEMERAL_V2 });
   }
   const [, , idStr] = interaction.customId.split(':');
   const zgloszenie = q.zgloszenie.get(parseInt(idStr, 10));
-  if (!zgloszenie || zgloszenie.status !== 'oczekuje' || !zgloszenie.kanal_id) {
-    return interaction.reply({ ...karty.kartaOstrzezenie('Już rozpatrzone', 'To zgłoszenie jest już zamknięte.'), flags: EPHEMERAL_V2 });
-  }
-  const ok = await interaction.channel.permissionOverwrites.edit(zgloszenie.zglaszajacy_id, {
-    ViewChannel: true, SendMessages: true, AttachFiles: true, ReadMessageHistory: true,
-  }, { reason: `Zgłoszenie zatrzymania #${zgloszenie.id}: dodał ${interaction.user.tag}` }).then(() => true).catch(() => false);
-  if (!ok) return interaction.reply({ ...karty.kartaBlad('Błąd uprawnień', 'Bot nie może zmienić uprawnień tego kanału.'), flags: EPHEMERAL_V2 });
+  const blad = await dodajZglaszajacego(interaction.channel, zgloszenie, interaction.user.tag);
+  if (blad) return interaction.reply({ ...karty.kartaBlad('Nie można dodać', blad), flags: EPHEMERAL_V2 });
+  await interaction.update(kartaZgloszeniaPoId(zgloszenie.id));
+}
 
-  q.zglaszajacyDodany.run(zgloszenie.id);
-  const list = q.poId.get(zgloszenie.list_id);
-  await interaction.update({ ...karty.kartaZgloszeniaListu({ list, zgloszenie: q.zgloszenie.get(zgloszenie.id) }), allowedMentions: { parse: [] } });
-  await interaction.channel.send({
-    content: `<@${zgloszenie.zglaszajacy_id}>, administracja ma pytania do Twojego zgłoszenia zatrzymania — odpowiedz tutaj.`,
-    allowedMentions: { users: [zgloszenie.zglaszajacy_id] },
-  }).catch(() => null);
+// /zatrzymanie dodaj-zglaszajacego - działa na kanale zgłoszenia także bez przycisku na karcie
+async function dodajZglaszajacegoNaKanale(interaction) {
+  const zgloszenie = q.zgloszenieNaKanale.get(interaction.channel.id);
+  if (!zgloszenie) return 'To nie jest kanał zgłoszenia zatrzymania.';
+  const blad = await dodajZglaszajacego(interaction.channel, zgloszenie, interaction.user.tag);
+  if (blad) return blad;
+  const wiad = zgloszenie.wiadomosc_id && await interaction.channel.messages.fetch(zgloszenie.wiadomosc_id).catch(() => null);
+  if (wiad) await wiad.edit(kartaZgloszeniaPoId(zgloszenie.id)).catch(() => null);
+  return null;
 }
 
 async function onZglosDecyzja(interaction) {
@@ -436,12 +461,23 @@ async function onEdytujModal(interaction) {
 
 // Po starcie: odświeżenie kart oczekujących zgłoszeń (np. dodanie przycisków z nowszej wersji bota)
 async function odswiezKartyZgloszen(client) {
-  for (const zgloszenie of q.oczekujaceZKanalem.all()) {
+  const oczekujace = q.oczekujaceZKanalem.all();
+  let odswiezone = 0;
+  for (const zgloszenie of oczekujace) {
     const kanal = await client.channels.fetch(zgloszenie.kanal_id).catch(() => null);
     const wiad = kanal && await kanal.messages.fetch(zgloszenie.wiadomosc_id).catch(() => null);
-    const list = q.poId.get(zgloszenie.list_id);
-    if (wiad && list) await wiad.edit({ ...karty.kartaZgloszeniaListu({ list, zgloszenie }), allowedMentions: { parse: [] } }).catch(() => null);
+    const payload = kartaZgloszeniaPoId(zgloszenie.id);
+    if (!wiad || !payload) {
+      console.warn(`[listy-goncze] nie znaleziono karty zgłoszenia #${zgloszenie.id} (kanał ${zgloszenie.kanal_id})`);
+      continue;
+    }
+    const ok = await wiad.edit(payload).then(() => true).catch((e) => {
+      console.warn(`[listy-goncze] nie udało się odświeżyć karty zgłoszenia #${zgloszenie.id}: ${e.message}`);
+      return false;
+    });
+    if (ok) odswiezone++;
   }
+  if (oczekujace.length) console.log(`[listy-goncze] odświeżono karty zgłoszeń zatrzymania: ${odswiezone}/${oczekujace.length}`);
 }
 
 // Cykliczne wygasanie
@@ -481,4 +517,5 @@ module.exports = {
   kartaListuDoWiadomosci,
   uruchomZadaniaCykliczne,
   odswiezKartyZgloszen,
+  dodajZglaszajacegoNaKanale,
 };
