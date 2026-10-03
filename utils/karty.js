@@ -499,11 +499,27 @@ function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null, nagrody = 
     c.addActionRowComponents(new ActionRowBuilder().addComponents(
       przycisk(`list:zglos:${list.id}`, 'Zgłoś zatrzymanie', ButtonStyle.Primary),
       przycisk(`list:nagroda:${list.id}`, 'Dołóż nagrodę', ButtonStyle.Success, '💰'),
-      ...(nagrody.length ? [przycisk(`list:nagrody-edytuj:${list.id}`, 'Edytuj nagrody', ButtonStyle.Secondary, '💱')] : []),
+      ...(nagrody.length ? [przycisk(`list:nagrody-edytuj:${list.id}`, 'Edytuj nagrody (lider/staff)', ButtonStyle.Secondary, '💱')] : []),
       przycisk(`list:edytuj:${list.id}`, 'Edytuj (lider/staff)', ButtonStyle.Secondary, '✏️'),
       przycisk(`list:zamknij:${list.id}`, 'Zamknij list', ButtonStyle.Danger),
     ));
   }
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaPotwierdzeniaNagrody({ list, nagroda, token }) {
+  const c = kontener(kolory.ostrzezenie);
+  c.addTextDisplayComponents(tekst('## Czy na pewno chcesz dołożyć nagrodę?'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**List:** #${list.id} — \`${list.nick}\`\n**Twoja nagroda:** ${nagroda}\n\n` +
+    '⚠️ **Dołożenie jest nieodwracalne.** Po potwierdzeniu nie będziesz mógł zmienić, zabrać ani usunąć tej nagrody.'
+  ));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(`list:nagroda-potw:${token}`, 'Tak, dokładam', ButtonStyle.Success, '💰'),
+    przycisk(`list:nagroda-anuluj:${token}`, 'Anuluj', ButtonStyle.Secondary),
+  ));
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -765,7 +781,7 @@ module.exports = {
   panelWeryfikacji, panelTicketow, kartaTicketu, kartaNotatekTicketu, listaNotatek, kartaWyjasnieniaTicketu, kartaOcenyTicketu,
   kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku, kartaNarady,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
-  kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow, kartaDowodowZatrzymania,
+  kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow, kartaDowodowZatrzymania, kartaPotwierdzeniaNagrody,
   kartaSprawy, kartaWyroku,
   kartaModCall, kartaPowitania,
   panelSelfrole,

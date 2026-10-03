@@ -61,7 +61,7 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 
 ### Liderzy (rola „Lider")
 - `/sojusz` — panel państwa dla króla (dodaj/usuń nick, zmień status Zastępca/Członek, paginacja). Tylko król może zarządzać składem.
-- `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff); `waznosc-dni: 0` = bez limitu czasu. Na karcie listu: **Dołóż nagrodę** (każdy), **Edytuj** i **Zamknij list** (administracja oraz lider państwa, które wystawiło list — powód, nagroda, ważność, 0 = bez limitu). Przycisk **Edytuj nagrody** pozwala zmienić lub usunąć dołożoną nagrodę: swoją — każdy, wszystkie — administracja i lider państwa wystawcy. Każda edycja trafia do logów jako „przed → po”.
+- `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff); `waznosc-dni: 0` = bez limitu czasu. Na karcie listu: **Dołóż nagrodę** (każdy), **Edytuj** i **Zamknij list** (administracja oraz lider państwa, które wystawiło list — powód, nagroda, ważność, 0 = bez limitu). Dołożenie nagrody wymaga potwierdzenia i jest **nieodwracalne** — dokładający nie może jej potem zmienić ani wycofać. Przycisk **Edytuj nagrody** (zmiana lub usunięcie dołożonej nagrody) działa tylko dla administracji i lidera państwa wystawcy. Każda edycja trafia do logów jako „przed → po”.
 - `/pozew` — pozew do Sądu Sojuszniczego przeciw graczowi (wybór **konta Discord**) albo państwu.
 
 ### Wszyscy
