@@ -6,7 +6,7 @@ const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
 const { glowaUrl } = require('../utils/minecraft.js');
-const { jestStaff } = require('../utils/uprawnienia.js');
+const { jestStaff, jestLider } = require('../utils/uprawnienia.js');
 const { log, wyslij } = require('../utils/logger.js');
 const { transkrypt } = require('../utils/transkrypt.js');
 const kolory = require('../utils/kolory.js');
@@ -19,6 +19,7 @@ const q = {
   aktualizujStatus: db.prepare('UPDATE listy_goncze SET status = ?, zamkniety = ?, zamkniety_przez = ? WHERE id = ?'),
   aktywneOWygasajaceDo: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' AND wygasa IS NOT NULL AND wygasa <= ?"),
   panstwoId: db.prepare('SELECT * FROM panstwa WHERE id = ?'),
+  panstwoLidera: db.prepare('SELECT * FROM panstwa WHERE lider_id = ?'),
   utworz: db.prepare('INSERT INTO listy_goncze (nick, powod, nagroda, wystawca_id, wystawca_panstwo_id, status, wygasa, utworzony) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
   nagrody: db.prepare('SELECT * FROM listy_nagrody WHERE list_id = ? ORDER BY id'),
   dodajNagrode: db.prepare('INSERT INTO listy_nagrody (list_id, user_id, nagroda, data) VALUES (?, ?, ?, ?)'),
@@ -74,13 +75,33 @@ async function aktualizujWiadomosc(client, id) {
 }
 
 async function zamknijList(client, id, status, przezUserId) {
+  const list = q.poId.get(id);
   q.aktualizujStatus.run(status, Date.now(), przezUserId, id);
   await aktualizujWiadomosc(client, id);
   await log(client, {
     tytul: 'List gończy zamknięty',
-    opis: `**#${id}** — status: **${status}**\n**Zamknął:** <@${przezUserId}>`,
+    opis: `**List:** #${id}${list ? ` — \`${list.nick}\`` : ''}\n**Status:** ${list?.status || '?'} → **${status}**\n**Zamknął:** <@${przezUserId}>`,
     kolor: kolory.info,
   });
+}
+
+// Edytować i zamykać listy może staff (każdy list) oraz lider państwa (listy swojego państwa lub wystawione przez siebie)
+function mozeZarzadzacListem(member, list) {
+  if (jestStaff(member)) return true;
+  if (!jestLider(member)) return false;
+  if (list.wystawca_id === member.id) return true;
+  const panstwo = q.panstwoLidera.get(member.id);
+  return Boolean(panstwo && list.wystawca_panstwo_id === panstwo.id);
+}
+
+const BRAK_UPRAWNIEN_LISTU = 'Edytować i zamykać listy gończe może administracja oraz lider państwa, które wystawiło list.';
+
+function zmiana(lista, pole, przed, po) {
+  lista.push(`**${pole}:**\n> ${String(przed).slice(0, 700)}\n→ ${String(po).slice(0, 700)}`);
+}
+
+function opisWaznosci(wygasa) {
+  return wygasa ? `do <t:${Math.floor(wygasa / 1000)}:f>` : 'bez limitu czasu';
 }
 
 const DZIEN_MS = 24 * 60 * 60 * 1000;
@@ -312,11 +333,8 @@ async function onZamknij(interaction) {
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
-  if (!jestStaff(interaction.member) && list.wystawca_id !== interaction.user.id) {
-    return interaction.reply({
-      ...karty.kartaBlad('Brak uprawnień', 'Zamknąć może wystawca lub staff.'),
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-    });
+  if (!mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', BRAK_UPRAWNIEN_LISTU), flags: EPHEMERAL_V2 });
   }
   await zamknijList(interaction.client, id, 'zrealizowany', interaction.user.id);
   await interaction.reply({
@@ -404,8 +422,8 @@ async function onEdytuj(interaction) {
   if (!list || list.status !== 'aktywny') {
     return interaction.reply({ ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'), flags: EPHEMERAL_V2 });
   }
-  if (!jestStaff(interaction.member) && list.wystawca_id !== interaction.user.id) {
-    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Edytować może wystawca listu lub administracja.'), flags: EPHEMERAL_V2 });
+  if (!mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', BRAK_UPRAWNIEN_LISTU), flags: EPHEMERAL_V2 });
   }
   const modal = new ModalBuilder().setCustomId(`list:edytuj-modal:${list.id}`).setTitle(`Edycja listu #${list.id}`);
   modal.addComponents(
@@ -431,8 +449,8 @@ async function onEdytujModal(interaction) {
   if (!list || list.status !== 'aktywny') {
     return interaction.reply({ ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'), flags: EPHEMERAL_V2 });
   }
-  if (!jestStaff(interaction.member) && list.wystawca_id !== interaction.user.id) {
-    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Edytować może wystawca listu lub administracja.'), flags: EPHEMERAL_V2 });
+  if (!mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', BRAK_UPRAWNIEN_LISTU), flags: EPHEMERAL_V2 });
   }
   const dniTekst = interaction.fields.getTextInputValue('dni').trim();
   const dni = /^\d+$/.test(dniTekst) ? parseInt(dniTekst, 10) : NaN;
@@ -444,13 +462,22 @@ async function onEdytujModal(interaction) {
   const wygasa = dni === 0 ? null : Date.now() + dni * DZIEN_MS;
   q.edytuj.run(powod, nagroda, wygasa, list.id);
   await aktualizujWiadomosc(interaction.client, list.id);
+
+  // Log edycji: każde zmienione pole w formie "przed → po"
+  const zmiany = [];
+  if (powod !== list.powod) zmiana(zmiany, 'Powód', list.powod, powod);
+  if ((nagroda || null) !== (list.nagroda || null)) zmiana(zmiany, 'Nagroda główna', list.nagroda || 'brak', nagroda || 'brak');
+  const staraWaznosc = opisWaznosci(list.wygasa);
+  const nowaWaznosc = opisWaznosci(wygasa);
+  // Ważność liczona od "teraz" zmienia się przy każdym zapisie - logujemy ją, gdy różni się o ponad minutę
+  if (Boolean(list.wygasa) !== Boolean(wygasa) || Math.abs((list.wygasa || 0) - (wygasa || 0)) > 60 * 1000) {
+    zmiana(zmiany, 'Ważność', staraWaznosc, nowaWaznosc);
+  }
   await log(interaction.client, {
     tytul: 'Edytowano list gończy',
     opis:
-      `**List:** #${list.id} — \`${list.nick}\`\n**Edytował:** <@${interaction.user.id}>\n` +
-      `**Nagroda:** ${list.nagroda || 'brak'} → ${nagroda || 'brak'}\n` +
-      `**Ważność:** ${dni === 0 ? 'bez limitu czasu' : `${dni} dni`}` +
-      (powod !== list.powod ? `\n**Nowy powód:** ${powod}` : ''),
+      `**List:** #${list.id} — \`${list.nick}\`\n**Edytował:** <@${interaction.user.id}>${jestStaff(interaction.member) ? ' (administracja)' : ' (lider)'}\n\n` +
+      (zmiany.length ? zmiany.join('\n\n') : '_Zapisano bez zmian._'),
     kolor: kolory.info,
   });
   await interaction.reply({

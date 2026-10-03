@@ -8,6 +8,8 @@ process.env.KANAL_LOGI = 'LOGI';
 process.env.KANAL_HISTORIA_TICKETOW = 'HIST';
 process.env.KANAL_LISTY_GONCZE = 'LG';
 process.env.KANAL_POWITANIA = 'POW';
+process.env.ROLA_LIDER = 'LIDER';
+process.env.TECHNIK_ID = 'TECHNIK';
 
 const fs = require('fs');
 const path = require('path');
@@ -38,8 +40,9 @@ async function bezpiecznie(opis, fn) {
 
 // Logi trafiają do tablicy zamiast na Discorda
 const logi = [];
+const logiOpisy = [];
 const logger = wymagaj('utils/logger.js');
-logger.log = async (_c, o) => { logi.push(o.tytul); };
+logger.log = async (_c, o) => { logi.push(o.tytul); logiOpisy.push(o.opis); };
 logger.wyslij = async () => {};
 
 const db = wymagaj('database/db.js');
@@ -139,7 +142,7 @@ const karty = wymagaj('utils/karty.js');
       id, name, parentId: null, wyslane: [], members: new Collection(),
       messages: { fetch: async (x) => (typeof x === 'string' ? { edit: async () => {} } : new Collection()), delete: async () => {} },
       permissionOverwrites: { edit: async () => {}, delete: async () => {} },
-      send: async (p) => { if (p.components) p.components.forEach(c => c.toJSON()); k.wyslane.push(p); return { id: `M${k.wyslane.length}`, url: 'https://discord.com/x', delete: async () => {} }; },
+      send: async (p) => { if (p.components) p.components.forEach(c => (typeof c.toJSON === 'function' ? c.toJSON() : c)); k.wyslane.push(p); return { id: `M${k.wyslane.length}`, url: 'https://discord.com/x', delete: async () => {} }; },
       bulkDelete: async () => {},
       delete: async () => { kanaly.delete(id); },
     };
@@ -314,6 +317,78 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(db.prepare('SELECT zglaszajacy_dodany FROM listy_zgloszenia WHERE id = ?').get(zgl.id).zglaszajacy_dodany === 1, 'zgłaszający dodany do kanału');
   await bezpiecznie('zatwierdzenie', () => znajdz(`list:zgl:ok:${zgl.id}`)(atrapa(`list:zgl:ok:${zgl.id}`, staff, { channel: kanaly.get(zgl.kanal_id) })));
   sprawdz(db.prepare('SELECT status FROM listy_goncze WHERE id = 1').get().status === 'zrealizowany', 'list zrealizowany po zatwierdzeniu');
+
+  // ---------------------------------------------------------------------
+  sekcja('List gończy: edycja i zamykanie tylko staff / lider państwa');
+  db.prepare("INSERT INTO listy_goncze (id, nick, powod, nagroda, wystawca_id, wystawca_panstwo_id, status, utworzony) VALUES (20, 'Cel', 'Stary powód', '5 dia', 'KROL', 1, 'aktywny', 0)").run();
+  const lider = (id) => ({ id, roles: { cache: new Map([['LIDER', 1]]) } });
+  const zwykly = { id: 'KROL_ZWYKLY', roles: { cache: new Map() } };
+  const modaleListu = modale.length;
+  await znajdz('list:edytuj:20')(atrapa('list:edytuj:20', lider('KROL2'), { user: { id: 'KROL2' } }));
+  await znajdz('list:edytuj:20')(atrapa('list:edytuj:20', zwykly, { user: { id: 'KROL_ZWYKLY' } }));
+  sprawdz(modale.length === modaleListu, 'lider innego państwa i zwykły gracz nie mogą edytować');
+  await znajdz('list:edytuj:20')(atrapa('list:edytuj:20', lider('KROL'), { user: { id: 'KROL' } }));
+  sprawdz(modale.length === modaleListu + 1, 'lider państwa wystawcy może edytować');
+  await znajdz('list:zamknij:20')(atrapa('list:zamknij:20', lider('KROL2'), { user: { id: 'KROL2' } }));
+  sprawdz(db.prepare('SELECT status FROM listy_goncze WHERE id = 20').get().status === 'aktywny', 'lider innego państwa nie zamknie listu');
+  logiOpisy.length = 0;
+  await znajdz('list:edytuj-modal:20')(atrapa('list:edytuj-modal:20', staff, {
+    user: { id: 'STAFFER' },
+    fields: { getTextInputValue: (id) => ({ powod: 'Nowy powód', nagroda: '10 dia', dni: '7' })[id] },
+  }));
+  const logEdycji = logiOpisy.join('\n');
+  sprawdz(/Stary powód[\s\S]*→ Nowy powód/.test(logEdycji) && /5 dia[\s\S]*→ 10 dia/.test(logEdycji) && /bez limitu czasu[\s\S]*→ do <t:/.test(logEdycji),
+    'log edycji pokazuje zmiany „przed → po”');
+  await znajdz('list:zamknij:20')(atrapa('list:zamknij:20', staff, { user: { id: 'STAFFER' } }));
+  sprawdz(db.prepare('SELECT status FROM listy_goncze WHERE id = 20').get().status === 'zrealizowany', 'staff zamyka list');
+
+  // ---------------------------------------------------------------------
+  sekcja('Ochrona logów: usunięty log wraca, sprawca traci rangi');
+  const ochrona = wymagaj('modules/ochrona-logow.js');
+  const dm = [];
+  const kanalLogow = kanaly.get('LOGI');
+  kanalLogow.guild = guild;
+  const wiadomoscLogu = (id) => ({
+    id, guild, client, channelId: 'LOGI', channel: kanalLogow, author: { id: 'BOT' }, flags: { bitfield: 32768 },
+    content: '', attachments: new Collection(), components: karty.kartaInfo({ tytul: 'Ważny log', opis: 'x' }).components,
+  });
+  let wpisyAudytu = [];
+  guild.ownerId = 'WLASCICIEL';
+  guild.name = 'SNZ';
+  guild.fetchAuditLogs = async () => ({ entries: new Collection(wpisyAudytu.map(w => [w.id, w])) });
+  guild.members.me = { roles: { highest: { position: 50 } } };
+  const roleAdmina = new Collection([['R_ADMIN', { id: 'R_ADMIN', name: 'Admin', position: 10, managed: false }], ['G', { id: 'G', name: '@everyone', position: 0 }]]);
+  const zdarzeniaAdmina = [];
+  guild.members.fetch = async (id) => ({
+    id, roles: { cache: roleAdmina, remove: async (ids) => zdarzeniaAdmina.push(`role-:${ids}`) },
+    timeout: async (ms) => zdarzeniaAdmina.push(`mute:${ms}`),
+  });
+  client.users.fetch = async (id) => ({ send: async () => dm.push(id) });
+  await ochrona.zapamietajLiczniki(guild);
+  await ochrona.zapamietaj(wiadomoscLogu('LOG1'));
+  sprawdz(ochrona.czyChroniona('LOG1'), 'kopia logu zapisana');
+  wpisyAudytu = [{ id: 'A1', executorId: 'ADMIN', targetId: 'BOT', extra: { channel: { id: 'LOGI' }, count: 1 }, createdTimestamp: Date.now() }];
+  const przedOdtworzeniem = kanalLogow.wyslane.length;
+  await wymagaj('events/messageDelete.js').execute(wiadomoscLogu('LOG1'));
+  const odtworzony = kanalLogow.wyslane[przedOdtworzeniem];
+  sprawdz(odtworzony && JSON.stringify(odtworzony.components).includes('Przywrócony log') && JSON.stringify(odtworzony.components).includes('Ważny log'), 'usunięty log wrócił na kanał');
+  sprawdz(zdarzeniaAdmina.includes('role-:R_ADMIN') && zdarzeniaAdmina.includes(`mute:${config.ochronaLogow.wyciszenieMs}`), 'sprawca stracił rangi i dostał wyciszenie');
+  sprawdz(dm.includes('ADMIN') && dm.includes('WLASCICIEL') && dm.includes('TECHNIK'), 'wiadomości do sprawcy, właściciela i technika');
+  sprawdz(db.prepare("SELECT role FROM odebrane_role WHERE user_id = 'ADMIN'").get()?.role === '["R_ADMIN"]', 'odebrane role zapisane do przywrócenia');
+  // Właściciel może usuwać logi - log wraca, ale bez kary
+  zdarzeniaAdmina.length = 0;
+  await ochrona.zapamietaj(wiadomoscLogu('LOG2'));
+  wpisyAudytu = [{ id: 'A2', executorId: 'WLASCICIEL', targetId: 'BOT', extra: { channel: { id: 'LOGI' }, count: 1 }, createdTimestamp: Date.now() }];
+  const przed2 = kanalLogow.wyslane.length;
+  await wymagaj('events/messageDelete.js').execute(wiadomoscLogu('LOG2'));
+  sprawdz(kanalLogow.wyslane.length === przed2 + 1 && zdarzeniaAdmina.length === 0, 'właściciel: log wraca, bez kary');
+  // Masowe usunięcie
+  await ochrona.zapamietaj(wiadomoscLogu('LOG3'));
+  await ochrona.zapamietaj(wiadomoscLogu('LOG4'));
+  wpisyAudytu = [{ id: 'B1', executorId: 'ADMIN2', targetId: 'LOGI', extra: { count: 2 }, createdTimestamp: Date.now() }];
+  const przed3 = kanalLogow.wyslane.length;
+  await wymagaj('events/messageDeleteBulk.js').execute(new Collection([['LOG3', wiadomoscLogu('LOG3')], ['LOG4', wiadomoscLogu('LOG4')]]), kanalLogow);
+  sprawdz(kanalLogow.wyslane.length >= przed3 + 2 && zdarzeniaAdmina.includes('role-:R_ADMIN'), 'masowe usunięcie: logi wracają, sprawca ukarany');
 
   // ---------------------------------------------------------------------
   console.log(`\n${testy - bledy}/${testy} sprawdzeń OK`);

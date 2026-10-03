@@ -57,10 +57,11 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 - `/zatrzymanie dodaj-zglaszajacego` — na kanale zgłoszenia zatrzymania wpuszcza zgłaszającego (to samo co przycisk na karcie).
 - `/antynuke status|whitelist-lista|raid` — stan ochrony, whitelista, ręczny tryb anty-raid.
 - `/antynuke whitelist-dodaj|whitelist-usun` — tylko właściciel serwera.
+- `/przywroc-role <osoba>` — właściciel / technik: przywraca role odebrane za usunięcie logu i zdejmuje wyciszenie.
 
 ### Liderzy (rola „Lider")
 - `/sojusz` — panel państwa dla króla (dodaj/usuń nick, zmień status Zastępca/Członek, paginacja). Tylko król może zarządzać składem.
-- `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff); `waznosc-dni: 0` = bez limitu czasu. Na karcie listu: **Dołóż nagrodę** (każdy) i **Edytuj** (wystawca/staff — powód, nagroda, ważność, 0 = bez limitu).
+- `/list-gonczy` — złożenie listu (do zatwierdzenia przez staff); `waznosc-dni: 0` = bez limitu czasu. Na karcie listu: **Dołóż nagrodę** (każdy), **Edytuj** i **Zamknij list** (administracja oraz lider państwa, które wystawiło list — powód, nagroda, ważność, 0 = bez limitu). Każda edycja trafia do logów jako „przed → po”.
 - `/pozew` — pozew do Sądu Sojuszniczego przeciw graczowi (wybór **konta Discord**) albo państwu.
 
 ### Wszyscy
@@ -83,6 +84,7 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
   Nazwy statusów i nazwa pliku są w `config.js` → `panstwa`.
 - **Listy gończe**: głowa skina z `mc-heads.net`, statusy `oczekuje/aktywny/zrealizowany/wygasly/odrzucony`, wygasanie sprawdzane co godzinę. **Zgłoszenie zatrzymania** (realizacja listu): formularz z opisem, obowiązkowym plikiem (zdjęcie/nagranie, do 5 plików) i opcjonalnym linkiem; powstaje kanał `zatrzymanie-<nick>-<id>` widoczny tylko dla administracji (kategoria `KATEGORIA_NARADY`), gdzie są dowody i przyciski Zatwierdź / Odrzuć / Dodaj zgłaszającego (żeby dopytać o szczegóły). Po decyzji zgłaszający dostaje DM, transkrypt trafia do logów, a kanał jest usuwany.
 - **Sąd sojuszniczy**: `/pozew` tworzy prywatny kanał ze sprawą (numer `SNZ-YYYY-NNNN`); pozwanym graczem jest konto Discord. Staff przyjmuje sprawę (max jedna aktywna na sędziego). **Konflikt interesów**: sędzią nie może zostać pozywający, pozwany ani nikt z państwa którejkolwiek ze stron (król lub członek). **Sędzia jest stały** — po przyjęciu nikt nie może przejąć sprawy (wyjątek: `/sprawa-sedzia` właściciela serwera). **Wyrok jest ostateczny** — nie ma odwołań. Rola „Sędzia" nadawana/odbierana automatycznie, publikacja wyroku w kanale wyroków, opcjonalny automatyczny list gończy na skazanego (po jego zweryfikowanym nicku), transkrypt po zamknięciu.
+- **Ochrona logów**: bot trzyma kopię każdej swojej wiadomości na kanałach logów (i historii ticketów). Usunięty log od razu wraca na kanał, a osoba, która go usunęła (poza właścicielem serwera i technikiem z `TECHNIK_ID`), traci rangi i dostaje wyciszenie na 1 h; sprawca, właściciel i technik dostają wiadomość prywatną. Role da się przywrócić `/przywroc-role`. Rola bota musi być wyżej niż role administracji, inaczej nie da się ich odebrać.
 - **Logi wiadomości**: usunięte i edytowane wiadomości (treść przed/po, załączniki, masowe usuwanie) na kanale `KANAL_LOGI_WIADOMOSCI` (domyślnie `KANAL_LOGI`). Logi nikogo nie pingują.
 - **Ostrzeżenia**: `/warn`, `/warny`, `/usun-warn`, konfigurowalne progi (auto-mute i auto-ban). Do progów liczą się tylko aktywne ostrzeżenia — wygasają po 30 dniach, a ostrzeżenia z wyroków sądu domyślnie się nie liczą (`config.js` → `ostrzezenia`).
 - **Automod**: flood, powtarzanie tej samej treści, masowe oznaczanie, próby `@everyone/@here` i zaproszenia na inne serwery — wiadomość jest usuwana, a autor wyciszany na 5 min (staff pomijany, progi w `config.js` → `automod`, wyłączenie: `AUTOMOD_WYLACZONY=true`).

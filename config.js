@@ -2,6 +2,8 @@ require('dotenv').config();
 
 module.exports = {
   token: process.env.BOT_TOKEN,
+  // Technik bota (ID użytkowników oddzielone przecinkami) - dostaje alerty o usunięciu logów, może przywracać role
+  technicy: (process.env.TECHNIK_ID || '').split(',').map(s => s.trim()).filter(Boolean),
   clientId: process.env.CLIENT_ID,
   guildId: process.env.GUILD_ID,
 
@@ -198,6 +200,16 @@ module.exports = {
     wyciszenieMs: 5 * 60 * 1000,
     // ID kanałów bez automodu (oddzielone przecinkami)
     pomijaneKanaly: (process.env.AUTOMOD_POMIJANE_KANALY || '').split(',').map(s => s.trim()).filter(Boolean),
+  },
+
+  ochronaLogow: {
+    wlaczona: process.env.OCHRONA_LOGOW_WYLACZONA !== 'true',
+    // Wyciszenie dla osoby, która usunęła log
+    wyciszenieMs: 60 * 60 * 1000,
+    // Jak długo bot trzyma kopie logów (do odtworzenia po usunięciu)
+    przechowujDni: 90,
+    // Maksymalny rozmiar załączników jednego logu zapisywanych w kopii (np. transkrypty)
+    maxRozmiarZalacznikow: 4 * 1024 * 1024,
   },
 
   kopie: {

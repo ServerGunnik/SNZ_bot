@@ -18,6 +18,7 @@ module.exports = {
       .catch((e) => console.error('[ready] karty zgłoszeń', e));
     require('../modules/tickety.js').uruchomZadaniaTicketow(client);
     require('../modules/kopie.js').uruchomKopie();
+    require('../modules/ochrona-logow.js').uruchomOchrone(client);
     await require('../modules/wolanie-moda.js').przywrocWezwania(client)
       .catch((e) => console.error('[ready] przywracanie wezwań', e));
   },
