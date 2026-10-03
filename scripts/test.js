@@ -343,11 +343,69 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(db.prepare('SELECT status FROM listy_goncze WHERE id = 20').get().status === 'zrealizowany', 'staff zamyka list');
 
   // ---------------------------------------------------------------------
+  sekcja('List gończy: edycja dołożonych nagród');
+  db.prepare("INSERT INTO listy_goncze (id, nick, powod, wystawca_id, wystawca_panstwo_id, status, utworzony) VALUES (21, 'Cel2', 'x', 'KROL', 1, 'aktywny', 0)").run();
+  const idA = db.prepare("INSERT INTO listy_nagrody (list_id, user_id, nagroda, data) VALUES (21, 'GRACZ_A', '5 diamentów', 0)").run().lastInsertRowid;
+  const idB = db.prepare("INSERT INTO listy_nagrody (list_id, user_id, nagroda, data) VALUES (21, 'GRACZ_B', 'stack żelaza', 0)").run().lastInsertRowid;
+  const kartaZNagrodami = JSON.stringify(wymagaj('modules/listy-goncze.js').kartaListuDoWiadomosci(db.prepare('SELECT * FROM listy_goncze WHERE id = 21').get()).components[0].toJSON());
+  sprawdz(kartaZNagrodami.includes('list:nagrody-edytuj:21'), 'karta listu ma przycisk „Edytuj nagrody”');
+  const graczA = { id: 'GRACZ_A', roles: { cache: new Map() } };
+  const odpowiedziA = [];
+  await znajdz('list:nagrody-edytuj:21')(atrapa('list:nagrody-edytuj:21', graczA, {
+    user: { id: 'GRACZ_A' }, reply: async (p) => odpowiedziA.push(JSON.stringify(p.components[0].toJSON())),
+  }));
+  sprawdz(odpowiedziA[0]?.includes('Brak uprawnień'), 'dokładający nie może edytować nawet swojej nagrody');
+  await znajdz('list:nagroda-edycja-modal')(atrapa(`list:nagroda-edycja-modal:${idA}`, graczA, {
+    user: { id: 'GRACZ_A' }, fields: { getTextInputValue: () => '' },
+  }));
+  sprawdz(db.prepare('SELECT nagroda FROM listy_nagrody WHERE id = ?').get(idA)?.nagroda === '5 diamentów', 'dokładający nie usunie swojej nagrody');
+  const opcjeStaff = [];
+  await znajdz('list:nagrody-edytuj:21')(atrapa('list:nagrody-edytuj:21', staff, {
+    user: { id: 'STAFFER' }, reply: async (p) => opcjeStaff.push(JSON.stringify(p.components[0].toJSON())),
+  }));
+  sprawdz(opcjeStaff[0]?.includes('5 diamentów') && opcjeStaff[0]?.includes('stack żelaza'), 'administracja widzi wszystkie nagrody');
+  logiOpisy.length = 0;
+  await znajdz('list:nagroda-edycja-modal')(atrapa(`list:nagroda-edycja-modal:${idA}`, staff, {
+    user: { id: 'STAFFER' }, fields: { getTextInputValue: () => '10 diamentów' },
+  }));
+  sprawdz(db.prepare('SELECT nagroda FROM listy_nagrody WHERE id = ?').get(idA).nagroda === '10 diamentów', 'administracja zmienia nagrodę');
+  sprawdz(/5 diamentów[\s\S]*→ 10 diamentów/.test(logiOpisy.join('\n')), 'log zmiany nagrody „przed → po”');
+  await znajdz('list:nagroda-edycja-modal')(atrapa(`list:nagroda-edycja-modal:${idB}`, staff, {
+    user: { id: 'STAFFER' }, fields: { getTextInputValue: () => '' },
+  }));
+  sprawdz(!db.prepare('SELECT 1 FROM listy_nagrody WHERE id = ?').get(idB), 'administracja usuwa nagrodę (puste pole)');
+
+  sekcja('List gończy: dołożenie nagrody wymaga potwierdzenia');
+  const liczNagrody = () => db.prepare('SELECT COUNT(*) c FROM listy_nagrody WHERE list_id = 21').get().c;
+  const przedDolozeniem = liczNagrody();
+  const potwierdzenia = [];
+  const dolozModal = () => znajdz('list:nagroda-modal:21')(atrapa('list:nagroda-modal:21', graczA, {
+    user: { id: 'GRACZ_A' }, fields: { getTextInputValue: () => 'zestaw netherite' },
+    reply: async (p) => potwierdzenia.push(JSON.stringify(p.components[0].toJSON())),
+  }));
+  await dolozModal();
+  sprawdz(liczNagrody() === przedDolozeniem, 'sam formularz nie dokłada nagrody');
+  sprawdz(potwierdzenia[0]?.includes('nieodwracalne') && potwierdzenia[0]?.includes('list:nagroda-potw:'), 'pokazuje się ostrzeżenie z potwierdzeniem');
+  const token = potwierdzenia[0].match(/list:nagroda-potw:([a-z0-9]+)/)[1];
+  await znajdz(`list:nagroda-potw:${token}`)(atrapa(`list:nagroda-potw:${token}`, gracz, { user: { id: 'OBCY' } }));
+  sprawdz(liczNagrody() === przedDolozeniem, 'cudze potwierdzenie nie działa');
+  await dolozModal();
+  const token2 = potwierdzenia[1].match(/list:nagroda-potw:([a-z0-9]+)/)[1];
+  await znajdz(`list:nagroda-anuluj:${token2}`)(atrapa(`list:nagroda-anuluj:${token2}`, graczA, { user: { id: 'GRACZ_A' } }));
+  await znajdz(`list:nagroda-potw:${token2}`)(atrapa(`list:nagroda-potw:${token2}`, graczA, { user: { id: 'GRACZ_A' } }));
+  sprawdz(liczNagrody() === przedDolozeniem, 'anulowanie nie dokłada nagrody');
+  await dolozModal();
+  const token3 = potwierdzenia[2].match(/list:nagroda-potw:([a-z0-9]+)/)[1];
+  await znajdz(`list:nagroda-potw:${token3}`)(atrapa(`list:nagroda-potw:${token3}`, graczA, { user: { id: 'GRACZ_A' } }));
+  sprawdz(liczNagrody() === przedDolozeniem + 1, 'potwierdzenie dokłada nagrodę');
+
+  // ---------------------------------------------------------------------
   sekcja('Ochrona logów: usunięty log wraca, sprawca traci rangi');
   const ochrona = wymagaj('modules/ochrona-logow.js');
   const dm = [];
   const kanalLogow = kanaly.get('LOGI');
   kanalLogow.guild = guild;
+  kanalLogow.client = client;
   const wiadomoscLogu = (id) => ({
     id, guild, client, channelId: 'LOGI', channel: kanalLogow, author: { id: 'BOT' }, flags: { bitfield: 32768 },
     content: '', attachments: new Collection(), components: karty.kartaInfo({ tytul: 'Ważny log', opis: 'x' }).components,

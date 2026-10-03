@@ -1,6 +1,7 @@
 const {
   MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
   LabelBuilder, FileUploadBuilder, AttachmentBuilder, ChannelType, PermissionFlagsBits,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
@@ -23,6 +24,9 @@ const q = {
   utworz: db.prepare('INSERT INTO listy_goncze (nick, powod, nagroda, wystawca_id, wystawca_panstwo_id, status, wygasa, utworzony) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
   nagrody: db.prepare('SELECT * FROM listy_nagrody WHERE list_id = ? ORDER BY id'),
   dodajNagrode: db.prepare('INSERT INTO listy_nagrody (list_id, user_id, nagroda, data) VALUES (?, ?, ?, ?)'),
+  nagrodaId: db.prepare('SELECT * FROM listy_nagrody WHERE id = ?'),
+  zmienNagrode: db.prepare('UPDATE listy_nagrody SET nagroda = ? WHERE id = ?'),
+  usunNagrode: db.prepare('DELETE FROM listy_nagrody WHERE id = ?'),
   edytuj: db.prepare('UPDATE listy_goncze SET powod = ?, nagroda = ?, wygasa = ? WHERE id = ?'),
   wgStatusu: {
     aktywne: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' ORDER BY id DESC"),
@@ -386,12 +390,17 @@ async function onNagroda(interaction) {
   }
   const modal = new ModalBuilder().setCustomId(`list:nagroda-modal:${list.id}`).setTitle(`Dołóż nagrodę — ${list.nick}`.slice(0, 45));
   modal.addComponents(new ActionRowBuilder().addComponents(
-    new TextInputBuilder().setCustomId('nagroda').setLabel('Co dokładasz do nagrody?')
+    new TextInputBuilder().setCustomId('nagroda').setLabel('Co dokładasz? (potem nie da się cofnąć)')
       .setPlaceholder('np. 5 diamentów, zestaw netherite')
       .setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(100).setRequired(true)
   ));
   await interaction.showModal(modal);
 }
+
+// Dołożenie nagrody jest nieodwracalne, więc najpierw prosimy o potwierdzenie.
+// Oczekujące potwierdzenia trzymamy w pamięci (wygasają po 10 min albo po restarcie bota).
+const oczekujaceNagrody = new Map(); // token -> { listId, userId, nagroda, czas }
+const WAZNOSC_POTWIERDZENIA_MS = 10 * 60 * 1000;
 
 async function onNagrodaModal(interaction) {
   const [, , idStr] = interaction.customId.split(':');
@@ -400,17 +409,130 @@ async function onNagrodaModal(interaction) {
     return interaction.reply({ ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'), flags: EPHEMERAL_V2 });
   }
   const nagroda = interaction.fields.getTextInputValue('nagroda').trim();
-  q.dodajNagrode.run(list.id, interaction.user.id, nagroda, Date.now());
+  const teraz = Date.now();
+  for (const [t, o] of oczekujaceNagrody) if (teraz - o.czas > WAZNOSC_POTWIERDZENIA_MS) oczekujaceNagrody.delete(t);
+  const token = `${teraz.toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  oczekujaceNagrody.set(token, { listId: list.id, userId: interaction.user.id, nagroda, czas: teraz });
+  await interaction.reply({ ...karty.kartaPotwierdzeniaNagrody({ list, nagroda, token }), flags: EPHEMERAL_V2 });
+}
+
+async function onNagrodaPotwierdz(interaction) {
+  const [, , token] = interaction.customId.split(':');
+  const oczekujaca = oczekujaceNagrody.get(token);
+  if (!oczekujaca || oczekujaca.userId !== interaction.user.id || Date.now() - oczekujaca.czas > WAZNOSC_POTWIERDZENIA_MS) {
+    oczekujaceNagrody.delete(token);
+    return interaction.update(karty.kartaOstrzezenie('Potwierdzenie wygasło', 'Kliknij „Dołóż nagrodę” na karcie listu jeszcze raz.'));
+  }
+  oczekujaceNagrody.delete(token);
+  const list = q.poId.get(oczekujaca.listId);
+  if (!list || list.status !== 'aktywny') {
+    return interaction.update(karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy został już zamknięty — nagroda nie została dołożona.'));
+  }
+  if (q.nagrody.all(list.id).length >= MAX_DOLOZONYCH_NAGROD) {
+    return interaction.update(karty.kartaOstrzezenie('Limit nagród', `Do listu dołożono już ${MAX_DOLOZONYCH_NAGROD} nagród.`));
+  }
+  q.dodajNagrode.run(list.id, interaction.user.id, oczekujaca.nagroda, Date.now());
   await aktualizujWiadomosc(interaction.client, list.id);
   await log(interaction.client, {
     tytul: 'Dołożono nagrodę do listu gończego',
-    opis: `**List:** #${list.id} — \`${list.nick}\`\n**Nagroda:** ${nagroda}\n**Dołożył:** <@${interaction.user.id}>`,
+    opis: `**List:** #${list.id} — \`${list.nick}\`\n**Nagroda:** ${oczekujaca.nagroda}\n**Dołożył:** <@${interaction.user.id}>`,
     kolor: kolory.info,
   });
-  await interaction.reply({ ...karty.kartaSukces('Nagroda dołożona', `Do listu **#${list.id}** na \`${list.nick}\` dodano: **${nagroda}**.`), flags: EPHEMERAL_V2 });
+  await interaction.update(karty.kartaSukces('Nagroda dołożona',
+    `Do listu **#${list.id}** na \`${list.nick}\` dodano: **${oczekujaca.nagroda}**.\n-# Tej nagrody nie możesz już zmienić ani wycofać.`));
 }
 
-// ---- Edycja (wystawca lub staff) ---------------------------------------
+async function onNagrodaAnuluj(interaction) {
+  const [, , token] = interaction.customId.split(':');
+  oczekujaceNagrody.delete(token);
+  await interaction.update(karty.kartaInfo({ tytul: 'Anulowano', opis: 'Nagroda nie została dołożona.' }));
+}
+
+// ---- Edycja dołożonych nagród --------------------------------------------
+// Dołożenie jest nieodwracalne dla dokładającego - zmieniać/usuwać nagrody może tylko
+// administracja i lider państwa wystawcy (np. przy pomyłce albo nadużyciu).
+
+const BRAK_UPRAWNIEN_NAGROD = 'Dołożonej nagrody nie można zmienić ani wycofać. Poprawić ją może tylko administracja albo lider państwa, które wystawiło list.';
+
+async function onNagrodyEdytuj(interaction) {
+  const [, , idStr] = interaction.customId.split(':');
+  const list = q.poId.get(parseInt(idStr, 10));
+  if (!list || list.status !== 'aktywny') {
+    return interaction.reply({ ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'), flags: EPHEMERAL_V2 });
+  }
+  if (!mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', BRAK_UPRAWNIEN_NAGROD), flags: EPHEMERAL_V2 });
+  }
+  const nagrody = q.nagrody.all(list.id);
+  if (!nagrody.length) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Brak nagród', 'Do tego listu nikt nie dołożył nagrody.'), flags: EPHEMERAL_V2 });
+  }
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`list:nagroda-wybor:${list.id}`)
+    .setPlaceholder('Wybierz nagrodę do edycji')
+    .addOptions(nagrody.slice(-25).map(n => new StringSelectMenuOptionBuilder()
+      .setLabel(n.nagroda.slice(0, 100))
+      .setValue(String(n.id))
+      .setDescription(`Dołożył: ${(interaction.client.users.cache?.get(n.user_id)?.username || n.user_id)}`.slice(0, 100))));
+  const c = karty.kontener(kolory.info);
+  c.addTextDisplayComponents(karty.tekst(`## Edycja nagród — list #${list.id} (\`${list.nick}\`)`));
+  c.addTextDisplayComponents(karty.tekst('-# Wybierz nagrodę. W formularzu zmień treść albo wyczyść pole, żeby ją usunąć.'));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(select));
+  await interaction.reply({ components: [c], flags: EPHEMERAL_V2 });
+}
+
+async function onNagrodaWybor(interaction) {
+  const [, , idStr] = interaction.customId.split(':');
+  const list = q.poId.get(parseInt(idStr, 10));
+  const nagroda = q.nagrodaId.get(parseInt(interaction.values[0], 10));
+  if (!list || list.status !== 'aktywny' || !nagroda || nagroda.list_id !== list.id) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Nieaktualne', 'Ta nagroda albo list już nie istnieje.'), flags: EPHEMERAL_V2 });
+  }
+  if (!mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', BRAK_UPRAWNIEN_NAGROD), flags: EPHEMERAL_V2 });
+  }
+  const modal = new ModalBuilder().setCustomId(`list:nagroda-edycja-modal:${nagroda.id}`).setTitle(`Edycja nagrody — ${list.nick}`.slice(0, 45));
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder().setCustomId('nagroda').setLabel('Nagroda (wyczyść pole, żeby usunąć)')
+      .setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setValue(nagroda.nagroda.slice(0, 100))
+  ));
+  await interaction.showModal(modal);
+}
+
+async function onNagrodaEdycjaModal(interaction) {
+  const [, , idStr] = interaction.customId.split(':');
+  const nagroda = q.nagrodaId.get(parseInt(idStr, 10));
+  const list = nagroda && q.poId.get(nagroda.list_id);
+  if (!nagroda || !list || list.status !== 'aktywny') {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Nieaktualne', 'Ta nagroda albo list już nie istnieje.'), flags: EPHEMERAL_V2 });
+  }
+  if (!mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', BRAK_UPRAWNIEN_NAGROD), flags: EPHEMERAL_V2 });
+  }
+  const nowa = interaction.fields.getTextInputValue('nagroda').trim();
+  if (nowa === nagroda.nagroda) {
+    return interaction.reply({ ...karty.kartaInfo({ tytul: 'Bez zmian', opis: 'Treść nagrody się nie zmieniła.' }), flags: EPHEMERAL_V2 });
+  }
+  if (nowa) q.zmienNagrode.run(nowa, nagroda.id);
+  else q.usunNagrode.run(nagroda.id);
+  await aktualizujWiadomosc(interaction.client, list.id);
+
+  await log(interaction.client, {
+    tytul: nowa ? 'Edytowano dołożoną nagrodę' : 'Usunięto dołożoną nagrodę',
+    opis:
+      `**List:** #${list.id} — \`${list.nick}\`\n**Dołożył:** <@${nagroda.user_id}>\n` +
+      `**Zmienił:** <@${interaction.user.id}>${jestStaff(interaction.member) ? ' (administracja)' : ' (lider)'}\n\n` +
+      `**Nagroda:**\n> ${nagroda.nagroda}\n→ ${nowa || '_usunięta_'}`,
+    kolor: nowa ? kolory.info : kolory.ostrzezenie,
+  });
+  await interaction.reply({
+    ...karty.kartaSukces(nowa ? 'Nagroda zmieniona' : 'Nagroda usunięta',
+      nowa ? `**${nagroda.nagroda}** → **${nowa}**` : `Usunięto nagrodę **${nagroda.nagroda}** z listu #${list.id}.`),
+    flags: EPHEMERAL_V2,
+  });
+}
+
+// ---- Edycja listu (staff / lider państwa wystawcy) ----------------------
 
 function pozostaloDni(list) {
   return list.wygasa ? Math.max(1, Math.ceil((list.wygasa - Date.now()) / DZIEN_MS)) : 0;
@@ -528,6 +650,11 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('list:zamknij', onZamknij);
   zarejestruj('list:nagroda', onNagroda);
   zarejestruj('list:nagroda-modal', onNagrodaModal);
+  zarejestruj('list:nagroda-potw', onNagrodaPotwierdz);
+  zarejestruj('list:nagroda-anuluj', onNagrodaAnuluj);
+  zarejestruj('list:nagrody-edytuj', onNagrodyEdytuj);
+  zarejestruj('list:nagroda-wybor', onNagrodaWybor);
+  zarejestruj('list:nagroda-edycja-modal', onNagrodaEdycjaModal);
   zarejestruj('list:edytuj', onEdytuj);
   zarejestruj('list:edytuj-modal', onEdytujModal);
   zarejestruj('listy:str', onStronaListow);
