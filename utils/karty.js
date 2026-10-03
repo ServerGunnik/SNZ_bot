@@ -499,7 +499,7 @@ function kartaListuGonczego({ list, glowaUrl, panstwoWystawcy = null, nagrody = 
     c.addActionRowComponents(new ActionRowBuilder().addComponents(
       przycisk(`list:zglos:${list.id}`, 'Zgłoś zatrzymanie', ButtonStyle.Primary),
       przycisk(`list:nagroda:${list.id}`, 'Dołóż nagrodę', ButtonStyle.Success, '💰'),
-      przycisk(`list:edytuj:${list.id}`, 'Edytuj', ButtonStyle.Secondary, '✏️'),
+      przycisk(`list:edytuj:${list.id}`, 'Edytuj (lider/staff)', ButtonStyle.Secondary, '✏️'),
       przycisk(`list:zamknij:${list.id}`, 'Zamknij list', ButtonStyle.Danger),
     ));
   }

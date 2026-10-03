@@ -195,6 +195,26 @@ CREATE TABLE IF NOT EXISTS mod_call (
 );
 CREATE INDEX IF NOT EXISTS idx_modcall_user ON mod_call(user_id, status);
 
+-- OCHRONA LOGÓW: kopie wiadomości bota na kanałach logów (do odtworzenia po usunięciu)
+CREATE TABLE IF NOT EXISTS logi_kopie (
+  wiadomosc_id TEXT PRIMARY KEY,
+  kanal_id TEXT NOT NULL,
+  dane TEXT NOT NULL,   -- JSON: { content, flags, components }
+  pliki TEXT,           -- JSON: [{ name, base64 }]
+  data INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_logi_kopie_data ON logi_kopie(data);
+
+-- Role odebrane za usunięcie logu (do ewentualnego przywrócenia przez właściciela/technika)
+CREATE TABLE IF NOT EXISTS odebrane_role (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL,   -- JSON: [roleId]
+  powod TEXT NOT NULL,
+  data INTEGER NOT NULL,
+  przywrocone INTEGER DEFAULT 0
+);
+
 -- ANTYNUKE
 CREATE TABLE IF NOT EXISTS antynuke_whitelist (
   user_id TEXT PRIMARY KEY,
