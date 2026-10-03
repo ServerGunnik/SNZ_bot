@@ -275,6 +275,93 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(zdarzenia.length === 0, 'właściciel serwera jest na whiteliście');
 
   // ---------------------------------------------------------------------
+  sekcja('Blokada botów: nowy bot bez uprawnień, zmienia je tylko właściciel');
+  const blokada = wymagaj('modules/blokada-botow.js');
+  const zapisBota = () => db.prepare("SELECT * FROM boty_uprawnienia WHERE bot_id = 'NOWYBOT'").get();
+  const zmianyRoliBota = [];
+  const rolaBota = {
+    id: 'ROLA_NOWY', guild, managed: true, tags: { botId: 'NOWYBOT' }, permissions: { bitfield: 8n },
+    setPermissions: async (b) => { rolaBota.permissions = { bitfield: BigInt(b) }; zmianyRoliBota.push(BigInt(b)); return rolaBota; },
+  };
+  guild.roles.cache.set('ROLA_NOWY', rolaBota);
+  guild.roles.botRoleFor = (u) => [...guild.roles.cache.values()].find(r => r.tags?.botId === (u.id || u)) || null;
+  guild.roles.fetch = async (id) => (id ? guild.roles.cache.get(id) : guild.roles.cache);
+  await blokada.obsluzWpisAudytu({ action: AuditLogEvent.BotAdd, executorId: 'ADMIN_X', targetId: 'NOWYBOT', changes: [] }, guild);
+  await wymagaj('events/roleCreate.js').execute(rolaBota);
+  sprawdz(rolaBota.permissions.bitfield === 0n, 'nowy bot traci wszystkie uprawnienia');
+  sprawdz(zapisBota()?.pierwotne === '8' && zapisBota()?.dodal === 'ADMIN_X', 'zapamiętano, o co prosił bot i kto go dodał');
+  await wymagaj('events/guildMemberAdd.js').execute({
+    id: 'NOWYBOT', guild, client, user: { id: 'NOWYBOT', bot: true },
+    roles: { cache: new Collection([['ROLA_NOWY', rolaBota]]), remove: async () => {} },
+  });
+  sprawdz(zmianyRoliBota.length === 1, 'rola bota blokowana tylko raz (roleCreate + guildMemberAdd)');
+
+  antynuke.dodajDoWhitelisty('ZAUFANY', 'WLASCICIEL');
+  const zmianaUprawnien = (kto, stare, nowe) => blokada.obsluzWpisAudytu({
+    action: AuditLogEvent.RoleUpdate, executorId: kto, targetId: 'ROLA_NOWY', changes: [{ key: 'permissions', old: stare, new: nowe }],
+  }, guild);
+  rolaBota.permissions = { bitfield: 8n };
+  await zmianaUprawnien('ZAUFANY', '0', '8');
+  sprawdz(rolaBota.permissions.bitfield === 0n, 'admin (nawet z whitelisty antynuke) nie da botowi uprawnień');
+  rolaBota.permissions = { bitfield: 2048n };
+  await zmianaUprawnien('WLASCICIEL', '0', '2048');
+  sprawdz(rolaBota.permissions.bitfield === 2048n && zapisBota().dozwolone === '2048', 'właściciel może zmienić uprawnienia bota');
+  rolaBota.permissions = { bitfield: 8n };
+  await zmianaUprawnien('ZAUFANY', '2048', '8');
+  sprawdz(rolaBota.permissions.bitfield === 2048n, 'cudza zmiana cofnięta do uprawnień ustawionych przez właściciela');
+
+  zdarzenia.length = 0;
+  const nadanieRoli = (kto) => blokada.obsluzWpisAudytu({
+    action: AuditLogEvent.MemberRoleUpdate, executorId: kto, targetId: 'NOWYBOT', changes: [{ key: '$add', new: [{ id: 'MODROLA' }] }],
+  }, guild);
+  await nadanieRoli('ZAUFANY');
+  sprawdz(zdarzenia.includes('zdjeto:NOWYBOT'), 'rola nadana botowi przez nie-właściciela zdjęta');
+  zdarzenia.length = 0;
+  await nadanieRoli('WLASCICIEL');
+  sprawdz(!zdarzenia.includes('zdjeto:NOWYBOT'), 'właściciel może nadać botowi rolę');
+
+  const kanalNadp = nowyKanal('KANAL_NADP');
+  const nadpisania = [];
+  kanalNadp.permissionOverwrites = {
+    cache: new Collection(),
+    delete: async (id) => nadpisania.push(`usun:${id}`),
+    create: async (id, o, opcje) => nadpisania.push(`ustaw:${id}:${opcje.type}:${JSON.stringify(o)}`),
+  };
+  await blokada.obsluzWpisAudytu({
+    action: AuditLogEvent.ChannelOverwriteCreate, executorId: 'ZAUFANY', targetId: 'KANAL_NADP',
+    extra: { id: 'NOWYBOT', type: 1 }, changes: [{ key: 'allow', new: '8' }],
+  }, guild);
+  sprawdz(nadpisania.includes('usun:NOWYBOT'), 'nowe uprawnienia bota na kanale usunięte');
+  await blokada.obsluzWpisAudytu({
+    action: AuditLogEvent.ChannelOverwriteUpdate, executorId: 'ZAUFANY', targetId: 'KANAL_NADP',
+    extra: { id: 'ROLA_NOWY', type: 0 }, changes: [{ key: 'allow', old: '0', new: '1024' }, { key: 'deny', old: '1024', new: '0' }],
+  }, guild);
+  sprawdz(nadpisania.some(n => n.startsWith('ustaw:ROLA_NOWY:0:') && n.includes('"ViewChannel":false')), 'zmiana uprawnień roli bota na kanale cofnięta');
+  const przedWlascicielem = nadpisania.length;
+  await blokada.obsluzWpisAudytu({
+    action: AuditLogEvent.ChannelOverwriteCreate, executorId: 'WLASCICIEL', targetId: 'KANAL_NADP',
+    extra: { id: 'NOWYBOT', type: 1 }, changes: [],
+  }, guild);
+  sprawdz(nadpisania.length === przedWlascicielem, 'właściciel może dać botowi uprawnienia na kanale');
+
+  const odpBot = [];
+  const komendaBot = wymagaj('commands/bot-uprawnienia.js');
+  const interakcjaBot = (userId, sub) => ({
+    guild, client, user: { id: userId }, member: gracz,
+    options: { getSubcommand: () => sub, getUser: () => ({ id: 'NOWYBOT', bot: true }) },
+    reply: async (p) => { p.components.forEach(c => c.toJSON()); odpBot.push(JSON.stringify(p.components[0].toJSON())); },
+  });
+  await komendaBot.execute(interakcjaBot('ZAUFANY', 'przywroc'));
+  sprawdz(odpBot[0]?.includes('Brak uprawnień') && rolaBota.permissions.bitfield === 2048n, 'tylko właściciel przywraca uprawnienia komendą');
+  await komendaBot.execute(interakcjaBot('WLASCICIEL', 'przywroc'));
+  sprawdz(rolaBota.permissions.bitfield === 8n && zapisBota().dozwolone === '8', 'właściciel przywraca uprawnienia, o które prosił bot');
+  await komendaBot.execute(interakcjaBot('WLASCICIEL', 'lista'));
+  sprawdz(odpBot[2]?.includes('NOWYBOT'), 'lista botów objętych blokadą');
+
+  await blokada.zablokujRole({ id: 'ROLA_NASZ', guild, tags: { botId: 'BOT' }, permissions: { bitfield: 8n }, setPermissions: async () => { throw new Error('nie wolno'); } });
+  sprawdz(!db.prepare("SELECT 1 FROM boty_uprawnienia WHERE bot_id = 'BOT'").get(), 'SNZ_bot nie blokuje samego siebie');
+
+  // ---------------------------------------------------------------------
   sekcja('Sąd: konflikt interesów, brak odwołań, stały sędzia');
   const sad = wymagaj('modules/sad.js');
   db.prepare("INSERT INTO panstwa (id, nazwa, lider_id, utworzone) VALUES (2, 'Niemcy', 'KROL2', 0)").run();

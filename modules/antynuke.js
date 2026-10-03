@@ -310,9 +310,9 @@ async function obsluzWpisAudytu(wpis, guild) {
   const sprawcaId = wpis.executorId;
   if (!sprawcaId || jestNaWhiteliscie(guild, sprawcaId)) return;
 
-  // Dodanie bota przez osobę spoza whitelisty
+  // Dodanie bota przez osobę spoza whitelisty (odebranie uprawnień robi modules/blokada-botow.js)
   if (wpis.action === AuditLogEvent.BotAdd) {
-    if (!config.antynuke.blokujBoty) return;
+    if (!config.antynuke.wyrzucajBoty) return;
     const bot = await guild.members.fetch(wpis.targetId).catch(() => null);
     const wynik = bot
       ? await bot.kick('Antynuke: bot dodany przez osobę spoza whitelisty').then(() => 'wyrzucony').catch((e) => `nie udało się wyrzucić: ${e.message}`)

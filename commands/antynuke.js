@@ -44,7 +44,8 @@ module.exports = {
         `nowe kanały ${an.progi.kanalUtworz}, usunięte role ${an.progi.rolaUsun}, nadanie uprawnień admina ${an.progi.nadanieUprawnien} (zawsze cofane), ` +
         `webhooki ${an.progi.webhook}, uprawnienia kanałów ${an.progi.uprawnieniaKanalow}, ustawienia serwera ${an.progi.serwer}\n` +
         `**Przywracanie szkód:** ${an.przywracaj ? 'tak' : 'nie'}\n` +
-        `**Blokada obcych botów:** ${an.blokujBoty ? 'tak' : 'nie'}\n\n` +
+        `**Blokada uprawnień nowych botów:** ${an.blokadaUprawnienBotow ? 'tak (zmienia je tylko właściciel, /bot-uprawnienia)' : 'nie'}\n` +
+        `**Wyrzucanie botów dodanych spoza whitelisty:** ${an.wyrzucajBoty ? 'tak' : 'nie'}\n\n` +
         `**Anty-raid:** ${s.antyraid ? 'włączony' : 'wyłączony'} — próg ${ar.progDolaczen} dołączeń w ${ar.oknoMs / 1000}s\n` +
         `**Tryb anty-raid:** ${s.trybRaidu ? `AKTYWNY do <t:${Math.floor(s.trybRaiduDo / 1000)}:T>` : 'nieaktywny'}`;
       const bot = interaction.guild.members.me;
