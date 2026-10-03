@@ -1,6 +1,7 @@
 const {
   MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
   LabelBuilder, FileUploadBuilder, AttachmentBuilder, ChannelType, PermissionFlagsBits,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
@@ -23,6 +24,9 @@ const q = {
   utworz: db.prepare('INSERT INTO listy_goncze (nick, powod, nagroda, wystawca_id, wystawca_panstwo_id, status, wygasa, utworzony) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
   nagrody: db.prepare('SELECT * FROM listy_nagrody WHERE list_id = ? ORDER BY id'),
   dodajNagrode: db.prepare('INSERT INTO listy_nagrody (list_id, user_id, nagroda, data) VALUES (?, ?, ?, ?)'),
+  nagrodaId: db.prepare('SELECT * FROM listy_nagrody WHERE id = ?'),
+  zmienNagrode: db.prepare('UPDATE listy_nagrody SET nagroda = ? WHERE id = ?'),
+  usunNagrode: db.prepare('DELETE FROM listy_nagrody WHERE id = ?'),
   edytuj: db.prepare('UPDATE listy_goncze SET powod = ?, nagroda = ?, wygasa = ? WHERE id = ?'),
   wgStatusu: {
     aktywne: db.prepare("SELECT * FROM listy_goncze WHERE status = 'aktywny' ORDER BY id DESC"),
@@ -410,7 +414,94 @@ async function onNagrodaModal(interaction) {
   await interaction.reply({ ...karty.kartaSukces('Nagroda dołożona', `Do listu **#${list.id}** na \`${list.nick}\` dodano: **${nagroda}**.`), flags: EPHEMERAL_V2 });
 }
 
-// ---- Edycja (wystawca lub staff) ---------------------------------------
+// ---- Edycja dołożonych nagród --------------------------------------------
+// Swoją nagrodę edytuje/usuwa ten, kto ją dołożył; wszystkie - administracja i lider państwa wystawcy.
+
+function nagrodyDoEdycji(member, list) {
+  const wszystkie = q.nagrody.all(list.id);
+  return mozeZarzadzacListem(member, list) ? wszystkie : wszystkie.filter(n => n.user_id === member.id);
+}
+
+async function onNagrodyEdytuj(interaction) {
+  const [, , idStr] = interaction.customId.split(':');
+  const list = q.poId.get(parseInt(idStr, 10));
+  if (!list || list.status !== 'aktywny') {
+    return interaction.reply({ ...karty.kartaOstrzezenie('List nieaktywny', 'Ten list gończy jest już zamknięty.'), flags: EPHEMERAL_V2 });
+  }
+  const nagrody = nagrodyDoEdycji(interaction.member, list);
+  if (!nagrody.length) {
+    return interaction.reply({
+      ...karty.kartaOstrzezenie('Brak nagród do edycji', 'Możesz edytować tylko nagrody, które sam dołożyłeś (administracja i lider państwa wystawcy — wszystkie).'),
+      flags: EPHEMERAL_V2,
+    });
+  }
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`list:nagroda-wybor:${list.id}`)
+    .setPlaceholder('Wybierz nagrodę do edycji')
+    .addOptions(nagrody.slice(-25).map(n => new StringSelectMenuOptionBuilder()
+      .setLabel(n.nagroda.slice(0, 100))
+      .setValue(String(n.id))
+      .setDescription(`Dołożył: ${(interaction.client.users.cache?.get(n.user_id)?.username || n.user_id)}`.slice(0, 100))));
+  const c = karty.kontener(kolory.info);
+  c.addTextDisplayComponents(karty.tekst(`## Edycja nagród — list #${list.id} (\`${list.nick}\`)`));
+  c.addTextDisplayComponents(karty.tekst('-# Wybierz nagrodę. W formularzu zmień treść albo wyczyść pole, żeby ją usunąć.'));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(select));
+  await interaction.reply({ components: [c], flags: EPHEMERAL_V2 });
+}
+
+async function onNagrodaWybor(interaction) {
+  const [, , idStr] = interaction.customId.split(':');
+  const list = q.poId.get(parseInt(idStr, 10));
+  const nagroda = q.nagrodaId.get(parseInt(interaction.values[0], 10));
+  if (!list || list.status !== 'aktywny' || !nagroda || nagroda.list_id !== list.id) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Nieaktualne', 'Ta nagroda albo list już nie istnieje.'), flags: EPHEMERAL_V2 });
+  }
+  if (nagroda.user_id !== interaction.user.id && !mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Możesz edytować tylko nagrody, które sam dołożyłeś.'), flags: EPHEMERAL_V2 });
+  }
+  const modal = new ModalBuilder().setCustomId(`list:nagroda-edycja-modal:${nagroda.id}`).setTitle(`Edycja nagrody — ${list.nick}`.slice(0, 45));
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder().setCustomId('nagroda').setLabel('Nagroda (wyczyść pole, żeby usunąć)')
+      .setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setValue(nagroda.nagroda.slice(0, 100))
+  ));
+  await interaction.showModal(modal);
+}
+
+async function onNagrodaEdycjaModal(interaction) {
+  const [, , idStr] = interaction.customId.split(':');
+  const nagroda = q.nagrodaId.get(parseInt(idStr, 10));
+  const list = nagroda && q.poId.get(nagroda.list_id);
+  if (!nagroda || !list || list.status !== 'aktywny') {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Nieaktualne', 'Ta nagroda albo list już nie istnieje.'), flags: EPHEMERAL_V2 });
+  }
+  if (nagroda.user_id !== interaction.user.id && !mozeZarzadzacListem(interaction.member, list)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Możesz edytować tylko nagrody, które sam dołożyłeś.'), flags: EPHEMERAL_V2 });
+  }
+  const nowa = interaction.fields.getTextInputValue('nagroda').trim();
+  if (nowa === nagroda.nagroda) {
+    return interaction.reply({ ...karty.kartaInfo({ tytul: 'Bez zmian', opis: 'Treść nagrody się nie zmieniła.' }), flags: EPHEMERAL_V2 });
+  }
+  if (nowa) q.zmienNagrode.run(nowa, nagroda.id);
+  else q.usunNagrode.run(nagroda.id);
+  await aktualizujWiadomosc(interaction.client, list.id);
+
+  const cudza = nagroda.user_id !== interaction.user.id;
+  await log(interaction.client, {
+    tytul: nowa ? 'Edytowano dołożoną nagrodę' : 'Usunięto dołożoną nagrodę',
+    opis:
+      `**List:** #${list.id} — \`${list.nick}\`\n**Dołożył:** <@${nagroda.user_id}>\n` +
+      `**Zmienił:** <@${interaction.user.id}>${cudza ? (jestStaff(interaction.member) ? ' (administracja)' : ' (lider)') : ''}\n\n` +
+      `**Nagroda:**\n> ${nagroda.nagroda}\n→ ${nowa || '_usunięta_'}`,
+    kolor: nowa ? kolory.info : kolory.ostrzezenie,
+  });
+  await interaction.reply({
+    ...karty.kartaSukces(nowa ? 'Nagroda zmieniona' : 'Nagroda usunięta',
+      nowa ? `**${nagroda.nagroda}** → **${nowa}**` : `Usunięto nagrodę **${nagroda.nagroda}** z listu #${list.id}.`),
+    flags: EPHEMERAL_V2,
+  });
+}
+
+// ---- Edycja listu (staff / lider państwa wystawcy) ----------------------
 
 function pozostaloDni(list) {
   return list.wygasa ? Math.max(1, Math.ceil((list.wygasa - Date.now()) / DZIEN_MS)) : 0;
@@ -528,6 +619,9 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('list:zamknij', onZamknij);
   zarejestruj('list:nagroda', onNagroda);
   zarejestruj('list:nagroda-modal', onNagrodaModal);
+  zarejestruj('list:nagrody-edytuj', onNagrodyEdytuj);
+  zarejestruj('list:nagroda-wybor', onNagrodaWybor);
+  zarejestruj('list:nagroda-edycja-modal', onNagrodaEdycjaModal);
   zarejestruj('list:edytuj', onEdytuj);
   zarejestruj('list:edytuj-modal', onEdytujModal);
   zarejestruj('listy:str', onStronaListow);
