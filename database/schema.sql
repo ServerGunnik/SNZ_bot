@@ -221,3 +221,19 @@ CREATE TABLE IF NOT EXISTS antynuke_whitelist (
   dodal TEXT NOT NULL,
   data INTEGER NOT NULL
 );
+
+-- Blokada uprawnień dodanych botów: rola bota trzymana na uprawnieniach zatwierdzonych przez właściciela
+CREATE TABLE IF NOT EXISTS boty_uprawnienia (
+  bot_id TEXT PRIMARY KEY,
+  rola_id TEXT,
+  pierwotne TEXT,                -- uprawnienia, o które prosił bot przy dodaniu (bitfield jako tekst)
+  dozwolone TEXT NOT NULL DEFAULT '0',
+  dodal TEXT,
+  data INTEGER NOT NULL
+);
+
+-- Proste ustawienia klucz-wartość
+CREATE TABLE IF NOT EXISTS stan (
+  klucz TEXT PRIMARY KEY,
+  wartosc TEXT
+);

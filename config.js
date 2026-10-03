@@ -167,8 +167,10 @@ module.exports = {
     kara: process.env.ANTYNUKE_KARA || 'role',
     // Cofanie szkód: odbanowanie, odtworzenie usuniętych kanałów/ról, usunięcie spamowanych kanałów
     przywracaj: true,
-    // Wyrzucanie botów dodanych przez osoby spoza whitelisty
-    blokujBoty: true,
+    // Każdy nowo dodany bot traci wszystkie uprawnienia; zmienić je może tylko właściciel serwera
+    blokadaUprawnienBotow: process.env.BLOKADA_BOTOW_WYLACZONA !== 'true',
+    // Dodatkowo wyrzucanie botów dodanych przez osoby spoza whitelisty
+    wyrzucajBoty: process.env.ANTYNUKE_WYRZUCAJ_BOTY === 'true',
     // Dodatkowa whitelista z .env (ID oddzielone przecinkami); właściciel serwera i bot są zawsze na whiteliście
     whitelist: (process.env.ANTYNUKE_WHITELIST || '').split(',').map(s => s.trim()).filter(Boolean),
   },

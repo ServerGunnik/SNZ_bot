@@ -19,6 +19,8 @@ module.exports = {
     require('../modules/tickety.js').uruchomZadaniaTicketow(client);
     require('../modules/kopie.js').uruchomKopie();
     require('../modules/ochrona-logow.js').uruchomOchrone(client);
+    require('../modules/blokada-botow.js').sprawdzPoUruchomieniu(client)
+      .catch((e) => console.error('[ready] blokada botów', e));
     await require('../modules/wolanie-moda.js').przywrocWezwania(client)
       .catch((e) => console.error('[ready] przywracanie wezwań', e));
   },
