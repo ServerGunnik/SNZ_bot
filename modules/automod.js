@@ -21,11 +21,12 @@ function pominiety(wiadomosc) {
   // Nasze własne wiadomości (karty, logi, odpowiedzi bota) nigdy nie są automodowane
   if (wiadomosc.author?.id === wiadomosc.client.user.id) return true;
   if (cfg.pomijaneKanaly.includes(wiadomosc.channelId) || cfg.pomijaneKanaly.includes(wiadomosc.channel?.parentId)) return true;
-  // Inne boty NIE są pomijane - mogą spamować tak samo jak ludzie i mają być karane
   const member = wiadomosc.member;
-  // Boty bez członka na serwerze (rzadko) - traktujemy jak zwykłą wiadomość do sprawdzenia
   if (!member) return false;
-  // Staff/osoby z ManageMessages pomijane - zostaje jak było
+  // Boty NIGDY nie są pomijane przez automod - nawet z uprawnieniami moderatora.
+  // Token legalnej, zweryfikowanej aplikacji może zostać przejęty i wykorzystany do ataku.
+  if (member.user?.bot) return false;
+  // Zwykłe konta: staff/osoby z ManageMessages pomijane
   return jestStaff(member) || member.permissions.has(PermissionFlagsBits.ManageMessages);
 }
 
@@ -69,13 +70,18 @@ async function naruszenie(wiadomosc, powod, doUsuniecia) {
   const { wyciszenieMs } = config.automod;
   const member = wiadomosc.member;
   let kara = 'usunięcie wiadomości';
-  // Discord nie pozwala wyciszać botów - za to można je wyrzucić, żeby nie spamowały dalej
+  // Discord nie pozwala wyciszać botów - banujemy, żeby nie można było dodać tego samego bota ponownie
   if (member?.user?.bot) {
-    if (member.kickable) {
+    if (member.bannable) {
+      const ok = await member.ban({ reason: `Automod: ${powod}`, deleteMessageSeconds: 24 * 60 * 60 })
+        .then(() => true).catch(() => false);
+      if (ok) kara += ' + BAN bota + skasowanie jego wiadomości z 24h';
+      else kara += ' (próba bana nieudana)';
+    } else if (member.kickable) {
       const ok = await member.kick(`Automod: ${powod}`).then(() => true).catch(() => false);
-      if (ok) kara += ' + wyrzucenie bota';
+      if (ok) kara += ' + wyrzucenie bota (nie można zbanować)';
     } else {
-      kara += ' (bot ma za wysoką rolę, nie udało się wyrzucić)';
+      kara += ' (bot ma za wysoką rolę, nie da się ani zbanować ani wyrzucić)';
     }
   } else if (wyciszenieMs > 0 && member?.moderatable && !member.isCommunicationDisabled()) {
     const ok = await member.timeout(wyciszenieMs, `Automod: ${powod}`).then(() => true).catch(() => false);
