@@ -52,7 +52,8 @@ function zapamietaj(wiadomosc) {
 }
 
 function aktualizuj(wiadomosc) {
-  if (!config.backupWiadomosci.wlaczony || pominac(wiadomosc)) return;
+  // Niepełna wiadomość (sprzed uruchomienia bota) może nie mieć treści - nie nadpisujemy kopii pustką
+  if (!config.backupWiadomosci.wlaczony || wiadomosc.partial || typeof wiadomosc.content !== 'string' || pominac(wiadomosc)) return;
   try {
     q.aktualizuj.run(wiadomosc.content || '', wiadomosc.id);
   } catch (e) {
@@ -124,6 +125,11 @@ async function odtworzWiadomosciNaKanale(nowyKanal, staryKanalId) {
   return { odtworzonych, wTranskrypcie: doTranskryptu.length };
 }
 
+// Kanał usunięty i nieodtworzony (np. zamknięty ticket) - jego kopie nie są już potrzebne
+function usunKopieKanalu(kanalId) {
+  q.usunKanalu.run(kanalId);
+}
+
 function rejestruj() {}
 
-module.exports = { rejestruj, zapamietaj, aktualizuj, odtworzWiadomosciNaKanale };
+module.exports = { rejestruj, zapamietaj, aktualizuj, odtworzWiadomosciNaKanale, usunKopieKanalu };

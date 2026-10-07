@@ -129,10 +129,10 @@ module.exports = {
     });
 
     // Ping staffu do przyjęcia
-    if (staff) {
+    if (staff.length) {
       await wyslij(interaction.client, config.kanaly.logiSad || config.kanaly.logi, {
-        content: `<@&${staff}> — nowa sprawa **${numer}** czeka na sędziego.`,
-        allowedMentions: { roles: [staff] },
+        content: `${staff.map(id => `<@&${id}>`).join(' ')} — nowa sprawa **${numer}** czeka na sędziego.`,
+        allowedMentions: { roles: staff },
       });
     }
 
