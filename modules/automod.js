@@ -16,11 +16,17 @@ const usunietePrzezAutomod = new Set();
 
 function pominiety(wiadomosc) {
   const cfg = config.automod;
-  if (!cfg.wlaczony || !wiadomosc.guild || wiadomosc.author.bot || wiadomosc.webhookId || wiadomosc.system) return true;
+  if (!cfg.wlaczony || !wiadomosc.guild || wiadomosc.webhookId || wiadomosc.system) return true;
   if (config.guildId && wiadomosc.guild.id !== config.guildId) return true;
+  // Nasze własne wiadomości (karty, logi, odpowiedzi bota) nigdy nie są automodowane
+  if (wiadomosc.author?.id === wiadomosc.client.user.id) return true;
   if (cfg.pomijaneKanaly.includes(wiadomosc.channelId) || cfg.pomijaneKanaly.includes(wiadomosc.channel?.parentId)) return true;
+  // Inne boty NIE są pomijane - mogą spamować tak samo jak ludzie i mają być karane
   const member = wiadomosc.member;
-  return !member || jestStaff(member) || member.permissions.has(PermissionFlagsBits.ManageMessages);
+  // Boty bez członka na serwerze (rzadko) - traktujemy jak zwykłą wiadomość do sprawdzenia
+  if (!member) return false;
+  // Staff/osoby z ManageMessages pomijane - zostaje jak było
+  return jestStaff(member) || member.permissions.has(PermissionFlagsBits.ManageMessages);
 }
 
 // Zapamiętuje wiadomość i zwraca naruszenie floodu/powtórzeń: { powod, wiadomosci } albo null
@@ -63,7 +69,15 @@ async function naruszenie(wiadomosc, powod, doUsuniecia) {
   const { wyciszenieMs } = config.automod;
   const member = wiadomosc.member;
   let kara = 'usunięcie wiadomości';
-  if (wyciszenieMs > 0 && member?.moderatable && !member.isCommunicationDisabled()) {
+  // Discord nie pozwala wyciszać botów - za to można je wyrzucić, żeby nie spamowały dalej
+  if (member?.user?.bot) {
+    if (member.kickable) {
+      const ok = await member.kick(`Automod: ${powod}`).then(() => true).catch(() => false);
+      if (ok) kara += ' + wyrzucenie bota';
+    } else {
+      kara += ' (bot ma za wysoką rolę, nie udało się wyrzucić)';
+    }
+  } else if (wyciszenieMs > 0 && member?.moderatable && !member.isCommunicationDisabled()) {
     const ok = await member.timeout(wyciszenieMs, `Automod: ${powod}`).then(() => true).catch(() => false);
     if (ok) kara += ` + wyciszenie ${Math.round(wyciszenieMs / 60000)} min`;
   }
