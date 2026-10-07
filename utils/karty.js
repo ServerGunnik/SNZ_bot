@@ -155,13 +155,12 @@ function kartaTicketu({
     przycisk('ticket:przejmij', przydzielony ? 'Przejęte' : 'Przejmij', ButtonStyle.Primary, null, Boolean(przydzielony)),
     przycisk('ticket:zamknij', 'Zamknij zgłoszenie', ButtonStyle.Danger)
   ));
-  const rowStaff = [przycisk(ticketId ? `ticket:notatki:${ticketId}` : 'ticket:notatki', 'Panel staffu', ButtonStyle.Secondary, '🔒')];
   if (listGonczy && ticketId) {
-    rowStaff.push(listGonczy.id
+    const rowStaff = [listGonczy.id
       ? przycisk(`ticket:list-wystawiony:${ticketId}`, `List gończy #${listGonczy.id} wystawiony`, ButtonStyle.Success, '🎯', true)
-      : przycisk(`ticket:wystaw-list:${ticketId}`, 'Wystaw list gończy', ButtonStyle.Success, '🎯'));
+      : przycisk(`ticket:wystaw-list:${ticketId}`, 'Wystaw list gończy', ButtonStyle.Success, '🎯')];
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(...rowStaff));
   }
-  c.addActionRowComponents(new ActionRowBuilder().addComponents(...rowStaff));
   return { components: [c], ...FLAGS_V2 };
 }
 

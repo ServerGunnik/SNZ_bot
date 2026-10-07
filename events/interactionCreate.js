@@ -2,7 +2,11 @@ const { InteractionType, MessageFlags } = require('discord.js');
 const { znajdz } = require('../handlers/componentHandler.js');
 const karty = require('../utils/karty.js');
 
+// Nie próbuj pisać do interakcji, która już wygasła (Unknown interaction / Unknown Webhook)
+const KODY_WYGASLE = new Set([10062, 10015]);
+
 async function bezpiecznaOdpowiedz(interaction, blad) {
+  if (KODY_WYGASLE.has(blad?.code)) return; // interakcja już wygasła, nie da się odpowiedzieć
   const payload = karty.kartaBlad('Coś poszło nie tak', blad?.message || 'Nieznany błąd.');
   try {
     if (interaction.deferred || interaction.replied) {
@@ -11,6 +15,13 @@ async function bezpiecznaOdpowiedz(interaction, blad) {
       await interaction.reply({ ...payload, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
     }
   } catch (_) {}
+}
+
+// Opis interakcji do logu błędu - żeby wiedzieć która komenda/komponent się wywalił
+function opisInterakcji(interaction) {
+  if (interaction.isChatInputCommand?.()) return `komenda /${interaction.commandName}`;
+  if (interaction.customId) return `komponent ${interaction.customId}`;
+  return `interakcja typu ${interaction.type}`;
 }
 
 module.exports = {
@@ -52,7 +63,7 @@ module.exports = {
         await handler(interaction, client);
       }
     } catch (e) {
-      console.error('[interactionCreate]', e);
+      console.error('[interactionCreate]', opisInterakcji(interaction), e);
       await bezpiecznaOdpowiedz(interaction, e);
     }
   },

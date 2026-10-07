@@ -30,17 +30,23 @@ function konfliktKrola(userId, panstwoId = null) {
 }
 
 async function nadajRoleLidera(guild, userId) {
-  if (!config.role.lider) return;
+  if (!config.role.lider.length) return;
   const czlonek = await guild.members.fetch(userId).catch(() => null);
-  const rola = guild.roles.cache.get(config.role.lider);
-  if (czlonek && rola) await czlonek.roles.add(rola).catch(() => {});
+  if (!czlonek) return;
+  for (const id of config.role.lider) {
+    const rola = guild.roles.cache.get(id);
+    if (rola) await czlonek.roles.add(rola).catch(() => {});
+  }
 }
 
 async function zabierzRoleLidera(guild, userId) {
-  if (!userId || !config.role.lider) return;
+  if (!userId || !config.role.lider.length) return;
   const czlonek = await guild.members.fetch(userId).catch(() => null);
-  const rola = guild.roles.cache.get(config.role.lider);
-  if (czlonek && rola) await czlonek.roles.remove(rola).catch(() => {});
+  if (!czlonek) return;
+  for (const id of config.role.lider) {
+    const rola = guild.roles.cache.get(id);
+    if (rola) await czlonek.roles.remove(rola).catch(() => {});
+  }
 }
 
 module.exports = {

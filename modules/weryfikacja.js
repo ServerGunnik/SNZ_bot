@@ -39,6 +39,11 @@ async function onModal(interaction) {
   const nick = interaction.fields.getTextInputValue('nick').trim();
 
   if (!walidujNick(nick)) {
+    await log(interaction.client, {
+      tytul: 'Wniosek o weryfikację — odrzucony',
+      opis: `**Użytkownik:** <@${interaction.user.id}>\n**Podany nick:** \`${nick}\`\n**Powód:** nieprawidłowy format nicku`,
+      kolor: kolory.ostrzezenie,
+    });
     return interaction.reply({
       ...karty.kartaBlad('Nieprawidłowy nick', 'Nick musi mieć 3–16 znaków i zawierać wyłącznie litery, cyfry oraz podkreślnik.'),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
@@ -53,14 +58,21 @@ async function onModal(interaction) {
   }
 
   if (stmtPoNick.get(nick)) {
+    await log(interaction.client, {
+      tytul: 'Wniosek o weryfikację — odrzucony',
+      opis: `**Użytkownik:** <@${interaction.user.id}>\n**Podany nick:** \`${nick}\`\n**Powód:** nick już zajęty przez inne konto Discord`,
+      kolor: kolory.ostrzezenie,
+    });
     return interaction.reply({
       ...karty.kartaBlad('Nick zajęty', 'Ten nick jest już powiązany z innym kontem Discord. Skontaktuj się ze staffem, jeśli to Twój nick.'),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
     });
   }
 
-  const rola = interaction.guild.roles.cache.get(config.role.zweryfikowany);
-  if (!rola) {
+  const role = config.role.zweryfikowany
+    .map(id => interaction.guild.roles.cache.get(id))
+    .filter(Boolean);
+  if (!role.length) {
     return interaction.reply({
       ...karty.kartaBlad('Błąd konfiguracji', 'Rola zweryfikowanego nie istnieje. Skontaktuj się ze staffem.'),
       flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
@@ -68,7 +80,7 @@ async function onModal(interaction) {
   }
 
   try {
-    await interaction.member.roles.add(rola, 'Weryfikacja przez bota');
+    await interaction.member.roles.add(role, 'Weryfikacja przez bota');
     if (config.weryfikacja.zmienPseudonim && interaction.member.manageable) {
       await interaction.member.setNickname(nick, 'Weryfikacja').catch(() => null);
     }
@@ -87,8 +99,8 @@ async function onModal(interaction) {
   });
 
   await log(interaction.client, {
-    tytul: 'Nowa weryfikacja',
-    opis: `**Użytkownik:** <@${interaction.user.id}>\n**Nick MC:** \`${nick}\``,
+    tytul: 'Wniosek o weryfikację — zaakceptowany',
+    opis: `**Użytkownik:** <@${interaction.user.id}>\n**Nick MC:** \`${nick}\`\n**Role nadane:** ${role.map(r => `<@&${r.id}>`).join(' ')}`,
     kolor: kolory.sukces,
   });
 }

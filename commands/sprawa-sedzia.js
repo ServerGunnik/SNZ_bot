@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db = require('../database/db.js');
 const karty = require('../utils/karty.js');
-const { jestStaff } = require('../utils/uprawnienia.js');
+const { jestStaff, wszechwladny } = require('../utils/uprawnienia.js');
 const { zmienSedziego, konfliktInteresow } = require('../modules/sad.js');
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
@@ -20,9 +20,9 @@ module.exports = {
     .addUserOption(o => o.setName('sedzia').setDescription('Nowy sędzia (musi należeć do staffu)').setRequired(true)),
 
   async execute(interaction) {
-    // Sędzia sprawy jest niezmienny - wyjątek ma tylko właściciel serwera (np. sędzia odszedł z serwera)
-    if (interaction.user.id !== interaction.guild.ownerId) {
-      return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Sędziego może awaryjnie zmienić wyłącznie właściciel serwera.'), flags: EPHEMERAL_V2 });
+    // Sędzia sprawy jest niezmienny - wyjątek ma właściciel serwera lub technik (np. sędzia odszedł z serwera)
+    if (!wszechwladny(interaction.member)) {
+      return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Sędziego może awaryjnie zmienić wyłącznie właściciel serwera albo technik.'), flags: EPHEMERAL_V2 });
     }
     const numer = interaction.options.getString('numer').trim().toUpperCase();
     const sprawa = q.poNumerze.get(numer);

@@ -204,13 +204,16 @@ async function onZglosModal(interaction) {
     permissionOverwrites: [
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels] },
-      ...(staff ? [{ id: staff, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] }] : []),
+      ...staff.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] })),
     ],
   });
 
   // Kanał zapisany PRZED wysłaniem karty - od niego zależy przycisk "Dodaj zgłaszającego"
   q.zapiszKanalZgloszenia.run(kanal.id, null, zgloszenieId);
-  if (staff) await kanal.send({ content: `<@&${staff}> nowe zgłoszenie zatrzymania do rozpatrzenia.`, allowedMentions: { roles: [staff] } }).catch(() => null);
+  if (staff.length) {
+    const ping = staff.map(id => `<@&${id}>`).join(' ');
+    await kanal.send({ content: `${ping} nowe zgłoszenie zatrzymania do rozpatrzenia.`, allowedMentions: { roles: staff } }).catch(() => null);
+  }
   const karta = await kanal.send({ ...karty.kartaZgloszeniaListu({ list, zgloszenie: q.zgloszenie.get(zgloszenieId) }), allowedMentions: { parse: [] } });
   q.zapiszKanalZgloszenia.run(kanal.id, karta.id, zgloszenieId);
 

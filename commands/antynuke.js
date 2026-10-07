@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestStaff } = require('../utils/uprawnienia.js');
+const { jestStaff, wszechwladny } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 const antynuke = require('../modules/antynuke.js');
@@ -27,11 +27,11 @@ module.exports = {
         .addChoices({ name: 'włącz', value: 'wlacz' }, { name: 'wyłącz', value: 'wylacz' }))),
 
   async execute(interaction) {
-    if (!jestStaff(interaction.member) && interaction.user.id !== interaction.guild.ownerId) {
+    if (!jestStaff(interaction.member)) {
       return odpowiedz(interaction, karty.kartaBlad('Brak uprawnień', 'Ta komenda jest dla staffu.'));
     }
     const sub = interaction.options.getSubcommand();
-    const czyWlasciciel = interaction.user.id === interaction.guild.ownerId;
+    const czyWlasciciel = wszechwladny(interaction.member);
 
     if (sub === 'status') {
       const s = antynuke.status();
@@ -67,7 +67,7 @@ module.exports = {
 
     if (sub === 'whitelist-dodaj' || sub === 'whitelist-usun') {
       if (!czyWlasciciel) {
-        return odpowiedz(interaction, karty.kartaBlad('Brak uprawnień', 'Whitelistą zarządza wyłącznie właściciel serwera.'));
+        return odpowiedz(interaction, karty.kartaBlad('Brak uprawnień', 'Whitelistą zarządza wyłącznie właściciel serwera albo technik.'));
       }
       const user = interaction.options.getUser('uzytkownik');
       if (sub === 'whitelist-dodaj') {

@@ -26,9 +26,10 @@ const aktywnePingi = new Map(); // id wezwania -> setTimeout
 
 function wiadomoscPingu(tekst = '') {
   const modPing = config.role.modPing;
+  const prefix = modPing.length ? `${modPing.map(id => `<@&${id}>`).join(' ')} ` : '';
   return {
-    content: `${modPing ? `<@&${modPing}> ` : ''}${tekst || 'Ktoś czeka na pomoc w poczekalni.'}`,
-    allowedMentions: modPing ? { roles: [modPing] } : { parse: [] },
+    content: `${prefix}${tekst || 'Ktoś czeka na pomoc w poczekalni.'}`,
+    allowedMentions: modPing.length ? { roles: modPing } : { parse: [] },
   };
 }
 

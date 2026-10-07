@@ -2,6 +2,7 @@
 // Gdy ktoś usunie log: log wraca na kanał, a sprawca (poza właścicielem serwera i technikiem)
 // traci rangi, dostaje wyciszenie i wiadomość prywatną; właściciel i technik dostają alert.
 const { AuditLogEvent, MessageFlags, AttachmentBuilder } = require('discord.js');
+const PRZYWROCONYCH_WIADOMOSCI_NA_KANAL = 200;
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
@@ -18,6 +19,8 @@ const q = {
   kopia: db.prepare('SELECT * FROM logi_kopie WHERE wiadomosc_id = ?'),
   usunKopie: db.prepare('DELETE FROM logi_kopie WHERE wiadomosc_id = ?'),
   usunStare: db.prepare('DELETE FROM logi_kopie WHERE data < ?'),
+  // Wszystkie kopie z danego kanału w kolejności chronologicznej - do odtworzenia po usunięciu całego kanału
+  kopieKanalu: db.prepare('SELECT * FROM logi_kopie WHERE kanal_id = ? ORDER BY data ASC'),
   // Odnośniki do wiadomości w historii ticketów - po odtworzeniu wskazują na nową wiadomość
   podmienHistorie: db.prepare('UPDATE tickety SET historia_wiad_id = ? WHERE historia_wiad_id = ?'),
   zapiszRole: db.prepare('INSERT INTO odebrane_role (user_id, role, powod, data) VALUES (?, ?, ?, ?)'),
@@ -83,14 +86,22 @@ function wyczyscStareKopie() {
 
 // ---- Odtwarzanie -------------------------------------------------------
 
-async function odtworz(kanal, kopia, sprawcaId) {
+async function odtworz(kanal, kopia, sprawcaId, { stealth = false } = {}) {
   const dane = JSON.parse(kopia.dane);
   const pliki = JSON.parse(kopia.pliki || '[]').map(p => new AttachmentBuilder(Buffer.from(p.base64, 'base64'), { name: p.name }));
-  const notka = `♻️ Przywrócony log — usunięty${sprawcaId ? ` przez <@${sprawcaId}>` : ''} <t:${Math.floor(Date.now() / 1000)}:R>`;
   const v2 = (dane.flags & MessageFlags.IsComponentsV2) === MessageFlags.IsComponentsV2;
-  const payload = v2
-    ? { components: [{ type: 10, content: `-# ${notka}` }, ...dane.components], flags: MessageFlags.IsComponentsV2 }
-    : { content: `-# ${notka}\n${dane.content}`.slice(0, 2000), components: dane.components };
+  let payload;
+  if (stealth) {
+    // Replay bez plakietki „przywrócony" - używane przy odtwarzaniu całego kanału logów
+    payload = v2
+      ? { components: dane.components, flags: MessageFlags.IsComponentsV2 }
+      : { content: dane.content || '', components: dane.components };
+  } else {
+    const notka = `♻️ Przywrócony log — usunięty${sprawcaId ? ` przez <@${sprawcaId}>` : ''} <t:${Math.floor(Date.now() / 1000)}:R>`;
+    payload = v2
+      ? { components: [{ type: 10, content: `-# ${notka}` }, ...dane.components], flags: MessageFlags.IsComponentsV2 }
+      : { content: `-# ${notka}\n${dane.content}`.slice(0, 2000), components: dane.components };
+  }
   const nowa = await kanal.send({ ...payload, files: pliki, allowedMentions: { parse: [] } }).catch((e) => {
     console.error('[ochrona-logow] nie udało się odtworzyć logu', kopia.wiadomosc_id, e.message);
     return null;
@@ -99,6 +110,54 @@ async function odtworz(kanal, kopia, sprawcaId) {
   q.podmienHistorie.run(nowa.id, kopia.wiadomosc_id);
   q.usunKopie.run(kopia.wiadomosc_id);
   return nowa;
+}
+
+// Zbiera stringowy content z komponentów v2 (TextDisplay zagnieżdżone w kontenerach/sekcjach)
+function tekstKomponentow(komponenty) {
+  const wynik = [];
+  for (const k of komponenty || []) {
+    if (typeof k.content === 'string') wynik.push(k.content);
+    if (k.components?.length) wynik.push(...tekstKomponentow(k.components));
+  }
+  return wynik;
+}
+
+// Odtwarza na nowo utworzonym kanale historię logów ze starego ID: 200 najnowszych jako wiadomości,
+// resztę jako transkrypt .txt na końcu. Zwraca { odtworzonych, wTranskrypcie }.
+async function odtworzHistorieKanalu(nowyKanal, staryKanalId) {
+  const kopie = q.kopieKanalu.all(staryKanalId);
+  if (!kopie.length) return { odtworzonych: 0, wTranskrypcie: 0 };
+
+  const limit = PRZYWROCONYCH_WIADOMOSCI_NA_KANAL;
+  const doTranskryptu = kopie.length > limit ? kopie.slice(0, kopie.length - limit) : [];
+  const doPrzywrocenia = kopie.length > limit ? kopie.slice(-limit) : kopie;
+
+  for (const k of doPrzywrocenia) {
+    await odtworz(nowyKanal, k, null, { stealth: true }).catch(() => null);
+  }
+
+  if (doTranskryptu.length) {
+    const linie = [];
+    linie.push(`=== Starsza historia kanału #${nowyKanal.name} (${staryKanalId}) ===`);
+    linie.push(`Odtworzono bezpośrednio: ${doPrzywrocenia.length} najnowszych wiadomości.`);
+    linie.push(`W tym pliku: ${doTranskryptu.length} starszych wiadomości (najstarsze pierwsze).`);
+    linie.push('');
+    for (const k of doTranskryptu) {
+      const czas = new Date(k.data).toISOString();
+      const dane = JSON.parse(k.dane);
+      const tekstKart = tekstKomponentow(dane.components);
+      const tresc = (dane.content || tekstKart.join('\n')) || '[wiadomość bez treści tekstowej]';
+      linie.push(`[${czas}]`);
+      linie.push(tresc);
+      linie.push('');
+    }
+    const buffer = Buffer.from(linie.join('\n'), 'utf8');
+    const plik = new AttachmentBuilder(buffer, { name: `historia-${nowyKanal.name}-${Date.now()}.txt` });
+    await nowyKanal.send({ files: [plik], allowedMentions: { parse: [] } }).catch(() => null);
+    for (const k of doTranskryptu) q.usunKopie.run(k.wiadomosc_id);
+  }
+
+  return { odtworzonych: doPrzywrocenia.length, wTranskrypcie: doTranskryptu.length };
 }
 
 // ---- Kto usunął (dziennik zdarzeń) --------------------------------------
@@ -246,5 +305,5 @@ function rejestruj() {}
 
 module.exports = {
   rejestruj, zapamietaj, zaktualizuj, czyChroniona, obsluzUsuniecie, obsluzMasoweUsuniecie,
-  przywrocRole, uruchomOchrone, zapamietajLiczniki,
+  przywrocRole, uruchomOchrone, zapamietajLiczniki, chronionyKanal, odtworzHistorieKanalu,
 };

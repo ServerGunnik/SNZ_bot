@@ -4,7 +4,6 @@ const {
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestLider } = require('../utils/uprawnienia.js');
 const { log, wyslij } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 
@@ -14,6 +13,8 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   zapiszKanal: db.prepare('UPDATE sprawy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   ostatnia: db.prepare("SELECT numer FROM sprawy ORDER BY id DESC LIMIT 1"),
+  // Najświeższa sprawa w oknie cooldownu dla danego pozywającego - do rate-limitu
+  ostatniaUzytkownika: db.prepare('SELECT utworzona FROM sprawy WHERE pozywajacy_id = ? AND utworzona >= ? ORDER BY utworzona DESC LIMIT 1'),
   panstwaPoNazwie: db.prepare('SELECT * FROM panstwa WHERE nazwa = ? COLLATE NOCASE'),
   wszystkiePanstwa: db.prepare('SELECT nazwa FROM panstwa ORDER BY nazwa COLLATE NOCASE'),
   panstwoLidera: db.prepare('SELECT * FROM panstwa WHERE lider_id = ?'),
@@ -37,7 +38,7 @@ function nastepnyNumer() {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('pozew')
-    .setDescription('Złóż pozew do Sądu Sojuszniczego (dla liderów)')
+    .setDescription('Złóż pozew do Sądu Sojuszniczego (jeden na dobę)')
     .setDMPermission(false)
     .addStringOption(o => o.setName('typ-pozwanego').setDescription('Kogo pozywasz').setRequired(true)
       .addChoices({ name: 'gracza (konto Discord)', value: 'gracz' }, { name: 'państwo', value: 'panstwo' }))
@@ -56,9 +57,14 @@ module.exports = {
   },
 
   async execute(interaction) {
-    if (!jestLider(interaction.member)) {
+    // Każdy może złożyć pozew niezależnie od rangi, ale tylko jeden na dobę
+    const cooldownMs = config.pozew.cooldownMs;
+    const ostatnia = q.ostatniaUzytkownika.get(interaction.user.id, Date.now() - cooldownMs);
+    if (ostatnia) {
+      const kolejny = Math.floor((ostatnia.utworzona + cooldownMs) / 1000);
       return interaction.reply({
-        ...karty.kartaBlad('Brak uprawnień', 'Pozew może złożyć wyłącznie lider państwa.'),
+        ...karty.kartaBlad('Masz już pozew w tej dobie',
+          `Możesz złożyć jeden pozew na ${Math.round(cooldownMs / (60 * 60 * 1000))} h. Kolejny możesz złożyć <t:${kolejny}:R> (<t:${kolejny}:t>).`),
         flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       });
     }
@@ -107,7 +113,7 @@ module.exports = {
         { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels] },
         { id: interaction.user.id, allow: dostepStrony },
         ...(pozwanyNaSerwerze && pozwanyId !== interaction.user.id ? [{ id: pozwanyId, allow: dostepStrony }] : []),
-        ...(staff ? [{ id: staff, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }] : []),
+        ...staff.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] })),
       ],
     });
 

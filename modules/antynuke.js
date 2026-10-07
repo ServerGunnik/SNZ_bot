@@ -64,6 +64,7 @@ function jestNaWhiteliscie(guild, userId) {
   if (!userId) return true;
   if (userId === guild.ownerId) return true;
   if (userId === guild.client.user.id) return true;
+  if (config.technicy.includes(userId)) return true;
   if (config.antynuke.whitelist.includes(userId)) return true;
   return Boolean(q.naWhiteliscie.get(userId));
 }
@@ -133,16 +134,17 @@ function zapamietajRole(rola) {
 
 // ---- Przywracanie ------------------------------------------------------
 
+// Zwraca Map<staryId, nowyKanal> — rozmiar mapy to liczba odtworzonych, a wartość pozwala wołającym
+// dalej działać na nowym kanale (np. odtworzyć historię logów)
 async function odtworzKanaly(guild, ids) {
   const zrzuty = ids.map(id => usunieteKanaly.get(id)?.zrzut).filter(Boolean)
     .filter(z => TYPY_KANALOW_DO_ODTWORZENIA.has(z.type));
   // Najpierw kategorie, żeby kanały mogły wrócić do nowych kategorii
   zrzuty.sort((a, b) => (b.type === ChannelType.GuildCategory) - (a.type === ChannelType.GuildCategory) || a.position - b.position);
 
-  const mapaId = new Map();
-  let odtworzone = 0;
+  const mapaKanalow = new Map();
   for (const z of zrzuty) {
-    const parent = z.parentId ? (mapaId.get(z.parentId) || (guild.channels.cache.has(z.parentId) ? z.parentId : null)) : null;
+    const parent = z.parentId ? (mapaKanalow.get(z.parentId)?.id || (guild.channels.cache.has(z.parentId) ? z.parentId : null)) : null;
     const overwrites = z.permissionOverwrites.filter(o =>
       o.type === 0 ? guild.roles.cache.has(o.id) : guild.members.cache.has(o.id)
     );
@@ -160,8 +162,7 @@ async function odtworzKanaly(guild, ids) {
       reason: 'Antynuke: odtworzenie usuniętego kanału',
     }).catch((e) => { console.error('[antynuke] odtworzenie kanału', z.name, e.message); return null; });
     if (!nowy) continue;
-    odtworzone++;
-    mapaId.set(z.id, nowy.id);
+    mapaKanalow.set(z.id, nowy);
     usunieteKanaly.delete(z.id);
     // Kanały, które zostały osierocone po usunięciu kategorii, wracają do niej
     for (const dzieckoId of z.dzieci) {
@@ -169,7 +170,7 @@ async function odtworzKanaly(guild, ids) {
       if (dziecko && !dziecko.parentId) await dziecko.setParent(nowy.id, { lockPermissions: false }).catch(() => {});
     }
   }
-  return odtworzone;
+  return mapaKanalow;
 }
 
 async function odtworzRole(guild, ids) {
@@ -212,7 +213,7 @@ async function przywroc(guild, lista) {
     const nazwa = a.zmiany?.find(z => z.key === 'name');
     if (nazwa?.old) await guild.setName(nazwa.old, 'Antynuke: przywrócenie nazwy serwera').catch(() => {});
   }
-  wynik.odtworzoneKanaly = await odtworzKanaly(guild, lista.filter(a => a.typ === 'kanalUsun').map(a => a.targetId));
+  wynik.odtworzoneKanaly = (await odtworzKanaly(guild, lista.filter(a => a.typ === 'kanalUsun').map(a => a.targetId))).size;
   wynik.odtworzoneRole = await odtworzRole(guild, lista.filter(a => a.typ === 'rolaUsun').map(a => a.targetId));
   return wynik;
 }
@@ -221,9 +222,10 @@ async function przywroc(guild, lista) {
 
 async function pingStaffu(client, tresc) {
   const staff = config.role.staff;
+  const prefix = staff.length ? `${staff.map(id => `<@&${id}>`).join(' ')} ` : '';
   await wyslij(client, config.kanaly.logiAntynuke, {
-    content: staff ? `<@&${staff}> ${tresc}` : tresc,
-    allowedMentions: staff ? { roles: [staff] } : { parse: [] },
+    content: `${prefix}${tresc}`,
+    allowedMentions: staff.length ? { roles: staff } : { parse: [] },
   });
 }
 
@@ -471,6 +473,7 @@ module.exports = {
   obsluzDolaczenie,
   zapamietajKanal,
   zapamietajRole,
+  odtworzKanaly,
   jestNaWhiteliscie,
   dodajDoWhitelisty,
   usunZWhitelisty,

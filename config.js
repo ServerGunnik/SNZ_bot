@@ -1,9 +1,12 @@
 require('dotenv').config();
 
+// ID z .env rozdzielane przecinkami (np. ROLA_STAFF=111,222,333) → tablica
+const listaId = (v) => (v || '').split(',').map(s => s.trim()).filter(Boolean);
+
 module.exports = {
   token: process.env.BOT_TOKEN,
   // Technik bota (ID użytkowników oddzielone przecinkami) - dostaje alerty o usunięciu logów, może przywracać role
-  technicy: (process.env.TECHNIK_ID || '').split(',').map(s => s.trim()).filter(Boolean),
+  technicy: listaId(process.env.TECHNIK_ID),
   clientId: process.env.CLIENT_ID,
   guildId: process.env.GUILD_ID,
 
@@ -32,12 +35,16 @@ module.exports = {
     pomoc: [process.env.POMOC_1_ID, process.env.POMOC_2_ID, process.env.POMOC_3_ID].filter(Boolean),
   },
 
+  // Każda pozycja to tablica ID (ROLA_*=111,222,333). Dla ról nadawanych przez bota (zweryfikowany,
+  // lider, sędzia) bot dodaje/odbiera wszystkie z listy; dla uprawnień wystarczy posiadanie dowolnej.
   role: {
-    zweryfikowany: process.env.ROLA_ZWERYFIKOWANY,
-    staff: process.env.ROLA_STAFF,
-    lider: process.env.ROLA_LIDER,
-    sedzia: process.env.ROLA_SEDZIA,
-    modPing: process.env.ROLA_MOD_PING || process.env.ROLA_STAFF,
+    zweryfikowany: listaId(process.env.ROLA_ZWERYFIKOWANY),
+    staff: listaId(process.env.ROLA_STAFF),
+    lider: listaId(process.env.ROLA_LIDER),
+    sedzia: listaId(process.env.ROLA_SEDZIA),
+    modPing: listaId(process.env.ROLA_MOD_PING || process.env.ROLA_STAFF),
+    // Mogą zamykać ticket niezależnie od tego, czy go przyjęli (poza nimi może tylko osoba, która przejęła)
+    zamykaczTicketu: listaId(process.env.ROLA_ZAMYKACZ_TICKETU),
   },
 
   weryfikacja: {
@@ -45,6 +52,11 @@ module.exports = {
     maxDlugoscNicka: 16,
     regexNicka: /^[a-zA-Z0-9_]{3,16}$/,
     zmienPseudonim: true,
+  },
+
+  pozew: {
+    // Każdy może złożyć 1 pozew na dobę niezależnie od rangi
+    cooldownMs: 24 * 60 * 60 * 1000,
   },
 
   tickety: {
@@ -212,6 +224,23 @@ module.exports = {
     przechowujDni: 90,
     // Maksymalny rozmiar załączników jednego logu zapisywanych w kopii (np. transkrypty)
     maxRozmiarZalacznikow: 4 * 1024 * 1024,
+  },
+
+  // Analogiczna ochrona kanałów: usunięcie kanału = odebranie rang i wyciszenie sprawcy.
+  // Bot, właściciel i technicy są zwolnieni; wątki pomijane.
+  ochronaKanalow: {
+    wlaczona: process.env.OCHRONA_KANALOW_WYLACZONA !== 'true',
+    wyciszenieMs: 60 * 60 * 1000,
+    // true = bot próbuje odtworzyć usunięty kanał ze zrzutu antynuke
+    odtwarzaj: process.env.OCHRONA_KANALOW_ODTWARZAJ !== 'false',
+  },
+
+  // Backup zwykłych wiadomości (nie-bot) z wszystkich kanałów, do odtworzenia webhookami
+  // po usunięciu kanału. Replay zachowuje nazwę i awatar oryginalnego autora.
+  backupWiadomosci: {
+    wlaczony: process.env.BACKUP_WIADOMOSCI_WYLACZONY !== 'true',
+    // Ile najnowszych wiadomości trzymać per kanał. Reszta trafia do transkryptu .txt przy odtworzeniu.
+    limitNaKanal: 200,
   },
 
   kopie: {

@@ -205,6 +205,21 @@ CREATE TABLE IF NOT EXISTS logi_kopie (
 );
 CREATE INDEX IF NOT EXISTS idx_logi_kopie_data ON logi_kopie(data);
 
+-- Backup wiadomości z pozostałych kanałów (nie-logi) do odtworzenia webhookami po usunięciu kanału.
+-- Trzymamy max config.backupWiadomosci.limitNaKanal najnowszych wiadomości per kanał.
+CREATE TABLE IF NOT EXISTS wiadomosci_kopie (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wiadomosc_id TEXT NOT NULL UNIQUE,
+  kanal_id TEXT NOT NULL,
+  autor_id TEXT NOT NULL,
+  autor_nazwa TEXT NOT NULL,
+  autor_awatar TEXT,
+  tresc TEXT,
+  zalaczniki TEXT, -- JSON: [{ name, url }]
+  utworzono INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wiadomosci_kopie_kanal ON wiadomosci_kopie(kanal_id, utworzono);
+
 -- Role odebrane za usunięcie logu (do ewentualnego przywrócenia przez właściciela/technika)
 CREATE TABLE IF NOT EXISTS odebrane_role (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

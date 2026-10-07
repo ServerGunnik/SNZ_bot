@@ -93,16 +93,23 @@ async function aktualizujKarteSprawy(client, sprawaId) {
 
 // Rola Sędzia znika, gdy sędzia nie prowadzi już żadnej sprawy
 async function zdejmijRoleSedziego(guild, userId, sprawa) {
-  if (!config.role.sedzia || q.aktywnaSedziego.get(userId)) return;
+  if (!config.role.sedzia.length || q.aktywnaSedziego.get(userId)) return;
   const czlonek = await guild.members.fetch(userId).catch(() => null);
-  if (czlonek) await czlonek.roles.remove(config.role.sedzia, `Koniec sprawy ${sprawa.numer}`).catch(() => {});
+  if (!czlonek) return;
+  for (const id of config.role.sedzia) {
+    await czlonek.roles.remove(id, `Koniec sprawy ${sprawa.numer}`).catch(() => {});
+  }
 }
 
 // Nadanie/odebranie roli Sędzia i dostępu do kanału sprawy
 async function ustawSedziego(guild, sprawa, userId, wlacz) {
-  if (wlacz && config.role.sedzia) {
+  if (wlacz && config.role.sedzia.length) {
     const czlonek = await guild.members.fetch(userId).catch(() => null);
-    if (czlonek) await czlonek.roles.add(config.role.sedzia, `Sędzia sprawy ${sprawa.numer}`).catch(() => {});
+    if (czlonek) {
+      for (const id of config.role.sedzia) {
+        await czlonek.roles.add(id, `Sędzia sprawy ${sprawa.numer}`).catch(() => {});
+      }
+    }
   } else if (!wlacz) {
     await zdejmijRoleSedziego(guild, userId, sprawa);
   }
@@ -144,9 +151,18 @@ async function onPrzyjmij(interaction) {
   await ustawSedziego(interaction.guild, sprawa, interaction.user.id, true);
   await aktualizujKarteSprawy(interaction.client, id);
 
+  const istniejace = config.role.sedzia.filter(id => interaction.guild.roles.cache.has(id));
+  const brakujace = config.role.sedzia.filter(id => !interaction.guild.roles.cache.has(id));
+  const rolaOpis = !config.role.sedzia.length
+    ? 'brak konfiguracji (ustaw ROLA_SEDZIA w .env)'
+    : istniejace.length
+      ? istniejace.map(id => `<@&${id}>`).join(' ') +
+        (brakujace.length ? ` _(w .env są też nieistniejące ID: ${brakujace.join(', ')})_` : '')
+      : `_żadna z ról w ROLA_SEDZIA (${config.role.sedzia.join(', ')}) nie istnieje na serwerze — zaktualizuj .env_`;
+
   await log(interaction.client, {
     tytul: 'Sędzia przyjął sprawę',
-    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Rola nadana:** ${config.role.sedzia ? `<@&${config.role.sedzia}>` : 'brak konfiguracji'}`,
+    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Rola nadana:** ${rolaOpis}`,
     kolor: kolory.info,
     kanal: 'logiSad',
   });

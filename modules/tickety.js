@@ -5,7 +5,7 @@ const {
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestStaff } = require('../utils/uprawnienia.js');
+const { jestStaff, wszechwladny, maRole } = require('../utils/uprawnienia.js');
 const { walidujNick } = require('../utils/minecraft.js');
 const { log } = require('../utils/logger.js');
 const { transkrypt } = require('../utils/transkrypt.js');
@@ -137,6 +137,21 @@ function ticketDlaStaffu(interaction, idStr) {
   return ticket;
 }
 
+// Zamykać ticket może: właściciel/technik, osoba z rolą ROLA_ZAMYKACZ_TICKETU
+// oraz osoba, która sama przejęła zgłoszenie. Zapobiega to zamykaniu cudzych zgłoszeń.
+function mozeZamknacTicket(interaction, ticket) {
+  if (wszechwladny(interaction.member)) return true;
+  if (maRole(interaction.member, config.role.zamykaczTicketu)) return true;
+  return Boolean(ticket.przydzielony && ticket.przydzielony === interaction.user.id);
+}
+
+function bladBrakUprawnienDoZamkniecia(interaction, ticket) {
+  return odpowiedz(interaction, karty.kartaBlad('Brak uprawnień',
+    ticket.przydzielony
+      ? `Zgłoszenie może zamknąć tylko <@${ticket.przydzielony}>, który je przejął. Wyjątek: właściciel, technik oraz role z \`ROLA_ZAMYKACZ_TICKETU\`.`
+      : 'Zanim zamkniesz zgłoszenie, przejmij je przyciskiem „Przejmij”. Zgłoszenie zamyka osoba, która je przyjęła.'));
+}
+
 // ---- Otwieranie: kategoria -> formularz -> kanał -----------------------
 
 async function onKategoriaSelect(interaction) {
@@ -192,7 +207,7 @@ async function onFormularz(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const kategoriaKanal = config.kanaly.kategoriaTickety || interaction.channel?.parentId;
-  const staffRoleId = config.role.staff;
+  const staffRole = config.role.staff;
   const nickPole = pola.find(p => kategoria.pola.find(k => k.id === p.id)?.nick);
   const temat = `${kategoria.label}${nickPole?.wartosc ? `: ${nickPole.wartosc}` : ''}`;
 
@@ -205,16 +220,17 @@ async function onFormularz(interaction) {
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.client.user.id, allow: DOSTEP_BOTA },
       { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] },
-      ...(staffRoleId ? [{ id: staffRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory] }] : []),
+      ...staffRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory] })),
     ],
   });
 
   const info = q.wstaw.run(kanal.id, interaction.user.id, kategoria.label, kategoria.value, JSON.stringify(pola), temat, Date.now());
   const ticket = q.poId.get(info.lastInsertRowid);
 
+  const pingStaff = staffRole.length ? ` ${staffRole.map(id => `<@&${id}>`).join(' ')}` : '';
   await kanal.send({
-    content: `<@${interaction.user.id}>${staffRoleId ? ` <@&${staffRoleId}>` : ''}`,
-    allowedMentions: { users: [interaction.user.id], roles: staffRoleId ? [staffRoleId] : [] },
+    content: `<@${interaction.user.id}>${pingStaff}`,
+    allowedMentions: { users: [interaction.user.id], roles: staffRole },
   });
   const karta = await kanal.send(kartaDlaTicketu(ticket));
   q.zapiszWiadomosc.run(karta.id, ticket.id);
@@ -264,7 +280,7 @@ function nazwaNarady(username, ticketId) {
 }
 
 async function utworzNarade(interaction, ticket) {
-  const staffRoleId = config.role.staff;
+  const staffRole = config.role.staff;
   const narada = await interaction.guild.channels.create({
     name: nazwaNarady(interaction.user.username, ticket.id),
     type: ChannelType.GuildText,
@@ -273,7 +289,7 @@ async function utworzNarade(interaction, ticket) {
     permissionOverwrites: [
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.client.user.id, allow: DOSTEP_BOTA },
-      ...(staffRoleId ? [{ id: staffRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] }] : []),
+      ...staffRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
     ],
   });
   q.zapiszNarade.run(narada.id, ticket.id);
@@ -392,9 +408,10 @@ async function onNotatkaModal(interaction) {
 // ---- Zamykanie: wynik -> wyjaśnienie -> historia ------------------------
 
 async function onZamknij(interaction) {
-  // Zgłoszenie zamyka wyłącznie administracja
+  // Zgłoszenie zamyka wyłącznie administracja, i tylko ta, która je przejęła (chyba że ma wyjątek)
   const ticket = ticketDlaStaffu(interaction);
   if (!ticket) return;
+  if (!mozeZamknacTicket(interaction, ticket)) return bladBrakUprawnienDoZamkniecia(interaction, ticket);
   await odpowiedz(interaction, karty.kartaWynikuTicketu(ticket.id, config.tickety.wyniki));
 }
 
@@ -402,6 +419,7 @@ async function onWynik(interaction) {
   const [, , idStr, kod] = interaction.customId.split(':');
   const ticket = ticketDlaStaffu(interaction, idStr);
   if (!ticket) return;
+  if (!mozeZamknacTicket(interaction, ticket)) return bladBrakUprawnienDoZamkniecia(interaction, ticket);
   const wynik = config.tickety.wyniki[kod];
   if (!wynik) return odpowiedz(interaction, karty.kartaBlad('Nieznany wynik', 'Wybierz wynik ponownie.'));
   const modal = new ModalBuilder()
@@ -501,6 +519,7 @@ async function onZamknijModal(interaction) {
   const [, , idStr, kod] = interaction.customId.split(':');
   const ticket = ticketDlaStaffu(interaction, idStr);
   if (!ticket) return;
+  if (!mozeZamknacTicket(interaction, ticket)) return bladBrakUprawnienDoZamkniecia(interaction, ticket);
   const wynik = config.tickety.wyniki[kod];
   if (!wynik || wynik.ukryty || ticket.kanal_id !== interaction.channel?.id) {
     return odpowiedz(interaction, karty.kartaBlad('Nie można zamknąć', 'Zamknij zgłoszenie ponownie przyciskiem na karcie ticketu.'));
@@ -539,7 +558,8 @@ async function sprawdzTickety(client) {
       const staff = config.role.staff;
       const tresc = `Ticket **#${ticket.id}** (${ticket.kategoria}) czeka od ponad ${przypomnienieGodz} h i nikt go nie przejął: <#${ticket.kanal_id}>`;
       if (cel) {
-        await cel.send({ content: `${staff ? `<@&${staff}> ` : ''}${tresc}`, allowedMentions: staff ? { roles: [staff] } : { parse: [] } }).catch(() => null);
+        const prefix = staff.length ? `${staff.map(id => `<@&${id}>`).join(' ')} ` : '';
+        await cel.send({ content: `${prefix}${tresc}`, allowedMentions: staff.length ? { roles: staff } : { parse: [] } }).catch(() => null);
       } else {
         await log(client, { tytul: 'Nieprzejęty ticket', opis: tresc, kolor: kolory.ostrzezenie, kanal: 'logiTickety' });
       }

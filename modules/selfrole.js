@@ -15,7 +15,7 @@ function powodBlokadyRoli(rola, guild) {
   if (rola.id === guild.id) return 'to rola @everyone';
   if (rola.managed) return 'rola jest zarządzana przez bota/integrację';
   if (maUprawnienia(rola.permissions.bitfield, UPRAWNIENIA_NIE_DLA_SELFROLE)) return 'rola ma uprawnienia administracyjne lub moderacyjne';
-  const chronione = Object.values(config.role).filter(Boolean);
+  const chronione = Object.values(config.role).flat().filter(Boolean);
   if (chronione.includes(rola.id)) return 'to rola systemowa bota (np. Zweryfikowany, Staff, Lider, Sędzia)';
   const bot = guild.members.me;
   if (bot && rola.position >= bot.roles.highest.position) return 'rola jest wyżej niż najwyższa rola bota';
