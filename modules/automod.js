@@ -3,6 +3,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 const config = require('../config.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
+const { jestNaWhiteliscie } = require('./antynuke.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 
@@ -21,7 +22,9 @@ function pominiety(wiadomosc) {
   // Nasze własne wiadomości (karty, logi, odpowiedzi bota) nigdy nie są automodowane
   if (wiadomosc.author?.id === wiadomosc.client.user.id) return true;
   if (cfg.pomijaneKanaly.includes(wiadomosc.channelId) || cfg.pomijaneKanaly.includes(wiadomosc.channel?.parentId)) return true;
-  // Inne boty NIE są pomijane - mogą spamować tak samo jak ludzie i mają być karane
+  // Inne boty NIE są pomijane - mogą spamować tak samo jak ludzie i mają być karane.
+  // Wyjątek: boty zaufane (whitelista antynuke), np. boty do logów czy muzyki, które piszą szybko seriami
+  if (wiadomosc.author?.bot && jestNaWhiteliscie(wiadomosc.guild, wiadomosc.author.id)) return true;
   const member = wiadomosc.member;
   // Boty bez członka na serwerze (rzadko) - traktujemy jak zwykłą wiadomość do sprawdzenia
   if (!member) return false;

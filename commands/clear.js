@@ -3,6 +3,7 @@ const karty = require('../utils/karty.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const { chronionyKanal } = require('../modules/ochrona-logow.js');
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
@@ -30,6 +31,11 @@ module.exports = {
     const kanal = interaction.channel;
     if (!kanal || ![ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread].includes(kanal.type)) {
       return interaction.editReply(karty.kartaBlad('Nieprawidłowy kanał', 'Czyszczenia używaj na kanałach tekstowych lub w wątkach.'));
+    }
+
+    // Usunięte logi i tak wracają (ochrona logów), a w dzienniku zdarzeń sprawcą byłby bot, nie osoba z komendy
+    if (chronionyKanal(kanal.id)) {
+      return interaction.editReply(karty.kartaBlad('Kanał logów', 'Kanałów z logami nie można czyścić.'));
     }
 
     const ile = interaction.options.getInteger('ile');

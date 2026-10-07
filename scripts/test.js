@@ -43,7 +43,8 @@ const logi = [];
 const logiOpisy = [];
 const logger = wymagaj('utils/logger.js');
 logger.log = async (_c, o) => { logi.push(o.tytul); logiOpisy.push(o.opis); };
-logger.wyslij = async () => {};
+const wyslaneWyslij = [];
+logger.wyslij = async (_c, _kanal, p) => { wyslaneWyslij.push(p); };
 
 const db = wymagaj('database/db.js');
 const config = wymagaj('config.js');
@@ -360,6 +361,61 @@ const karty = wymagaj('utils/karty.js');
 
   await blokada.zablokujRole({ id: 'ROLA_NASZ', guild, tags: { botId: 'BOT' }, permissions: { bitfield: 8n }, setPermissions: async () => { throw new Error('nie wolno'); } });
   sprawdz(!db.prepare("SELECT 1 FROM boty_uprawnienia WHERE bot_id = 'BOT'").get(), 'SNZ_bot nie blokuje samego siebie');
+
+  // ---------------------------------------------------------------------
+  sekcja('Odtwarzanie kanału, backup wiadomości, automod na boty, /clear, /pozew');
+  const tworzoneKanaly = [];
+  const tworzenieKanalu = guild.channels.create;
+  guild.channels.create = async (o) => { await new Promise(r => setTimeout(r, 20)); tworzoneKanaly.push(o.name); return nowyKanal(`ODT${tworzoneKanaly.length}`, o.name); };
+  antynuke.zapamietajKanal({ id: 'USUNIETY', name: 'ogloszenia', type: ChannelType.GuildText, guild, parentId: null, position: 1, permissionOverwrites: { cache: new Collection() } });
+  await Promise.all([antynuke.odtworzKanaly(guild, ['USUNIETY']), antynuke.odtworzKanaly(guild, ['USUNIETY'])]);
+  sprawdz(tworzoneKanaly.length === 1, 'ochrona kanałów i antynuke nie odtworzą kanału dwa razy');
+  guild.channels.create = tworzenieKanalu;
+
+  const backup = wymagaj('modules/backup-wiadomosci.js');
+  const wiadomoscGracza = (id, tresc, extra = {}) => ({
+    id, guild, channelId: 'KANAL_B', channel: { isThread: () => false }, content: tresc, system: false, createdTimestamp: Date.now(),
+    author: { id: 'GRACZ', bot: false, username: 'gracz', displayAvatarURL: () => null }, attachments: new Collection(), ...extra,
+  });
+  backup.zapamietaj(wiadomoscGracza('B1', 'cześć'));
+  backup.aktualizuj(wiadomoscGracza('B1', null, { partial: true }));
+  const kopiaB = () => db.prepare("SELECT tresc FROM wiadomosci_kopie WHERE wiadomosc_id = 'B1'").get();
+  sprawdz(kopiaB()?.tresc === 'cześć', 'niepełna edycja nie czyści kopii wiadomości');
+  backup.usunKopieKanalu('KANAL_B');
+  sprawdz(!kopiaB(), 'kopie wiadomości usuniętego kanału są sprzątane');
+
+  const wyrzuceniBoty = [];
+  const wiadomoscBota = (autorId, id) => ({
+    ...wiadomosc('discord.gg/reklama', id),
+    author: { id: autorId, tag: 'b#0', bot: true },
+    member: { user: { bot: true }, kickable: true, kick: async () => wyrzuceniBoty.push(autorId), roles: { cache: new Map() }, permissions: { has: () => false } },
+  });
+  await automod.obsluzWiadomosc(wiadomoscBota('OBCYBOT', 'AB1'));
+  sprawdz(usuniete.includes('AB1') && wyrzuceniBoty.includes('OBCYBOT'), 'automod wyrzuca spamującego obcego bota');
+  antynuke.dodajDoWhitelisty('ZAUFANYBOT', 'WLASCICIEL');
+  await automod.obsluzWiadomosc(wiadomoscBota('ZAUFANYBOT', 'AB2'));
+  sprawdz(!usuniete.includes('AB2') && !wyrzuceniBoty.includes('ZAUFANYBOT'), 'bot z whitelisty antynuke nie podlega automodowi');
+
+  const odpClear = [];
+  await wymagaj('commands/clear.js').execute({
+    member: staff, user: { id: 'STAFFER' }, client, channel: { ...kanaly.get('LOGI'), type: ChannelType.GuildText },
+    options: { getInteger: () => 10, getUser: () => null },
+    deferReply: async () => {}, editReply: async (p) => odpClear.push(JSON.stringify(p.components[0].toJSON())),
+  });
+  sprawdz(odpClear[0]?.includes('Kanałów z logami nie można czyścić'), '/clear nie czyści kanału logów');
+
+  const przedPozwem = wyslaneWyslij.length;
+  await wymagaj('commands/pozew.js').execute({
+    guild, client, user: { id: 'POWOD_POZWU' }, member: gracz,
+    options: {
+      getString: (n) => ({ 'typ-pozwanego': 'gracz', zarzut: 'kradzież', opis: 'ukradł diamenty' }[n] ?? null),
+      getUser: () => ({ id: 'POZWANY_POZWU', bot: false }),
+    },
+    deferReply: async () => {}, editReply: async () => {}, reply: async () => {},
+  });
+  db.prepare("DELETE FROM sprawy WHERE pozywajacy_id = 'POWOD_POZWU'").run(); // dalsze testy używają własnych ID spraw
+  const pingPozwu = wyslaneWyslij.slice(przedPozwem).find(p => p.content?.includes('czeka na sędziego'));
+  sprawdz(pingPozwu?.content.startsWith('<@&STAFF>') && JSON.stringify(pingPozwu.allowedMentions) === '{"roles":["STAFF"]}', '/pozew poprawnie pinguje role staffu');
 
   // ---------------------------------------------------------------------
   sekcja('Sąd: konflikt interesów, brak odwołań, stały sędzia');

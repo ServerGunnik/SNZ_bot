@@ -143,6 +143,8 @@ async function odtworzKanaly(guild, ids) {
   zrzuty.sort((a, b) => (b.type === ChannelType.GuildCategory) - (a.type === ChannelType.GuildCategory) || a.position - b.position);
 
   const mapaKanalow = new Map();
+  // Zrzut zabieramy z pamięci od razu - ochrona kanałów i antynuke mogą odtwarzać ten sam kanał równocześnie
+  for (const z of zrzuty) usunieteKanaly.delete(z.id);
   for (const z of zrzuty) {
     const parent = z.parentId ? (mapaKanalow.get(z.parentId)?.id || (guild.channels.cache.has(z.parentId) ? z.parentId : null)) : null;
     const overwrites = z.permissionOverwrites.filter(o =>
@@ -161,9 +163,11 @@ async function odtworzKanaly(guild, ids) {
       position: z.position,
       reason: 'Antynuke: odtworzenie usuniętego kanału',
     }).catch((e) => { console.error('[antynuke] odtworzenie kanału', z.name, e.message); return null; });
-    if (!nowy) continue;
+    if (!nowy) {
+      usunieteKanaly.set(z.id, { zrzut: z, czas: Date.now() }); // do ponownej próby
+      continue;
+    }
     mapaKanalow.set(z.id, nowy);
-    usunieteKanaly.delete(z.id);
     // Kanały, które zostały osierocone po usunięciu kategorii, wracają do niej
     for (const dzieckoId of z.dzieci) {
       const dziecko = guild.channels.cache.get(dzieckoId);
