@@ -20,25 +20,20 @@ module.exports = {
     .addUserOption(o => o.setName('uzytkownik').setDescription('Usuwaj tylko wiadomości tej osoby')),
 
   async execute(interaction) {
+    // Defer PIERWSZE - Discord daje 3s na pierwszą odpowiedź, jak zrobimy sprawdzenia przed, to możemy nie zdążyć
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     if (!jestStaff(interaction.member)) {
-      return interaction.reply({
-        ...karty.kartaBlad('Brak uprawnień', 'Ta komenda jest dla staffu.'),
-        flags: EPHEMERAL_V2,
-      });
+      return interaction.editReply(karty.kartaBlad('Brak uprawnień', 'Ta komenda jest dla staffu.'));
     }
 
     const kanal = interaction.channel;
     if (!kanal || ![ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread].includes(kanal.type)) {
-      return interaction.reply({
-        ...karty.kartaBlad('Nieprawidłowy kanał', 'Czyszczenia używaj na kanałach tekstowych lub w wątkach.'),
-        flags: EPHEMERAL_V2,
-      });
+      return interaction.editReply(karty.kartaBlad('Nieprawidłowy kanał', 'Czyszczenia używaj na kanałach tekstowych lub w wątkach.'));
     }
 
     const ile = interaction.options.getInteger('ile');
     const user = interaction.options.getUser('uzytkownik');
-
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     // Przy filtrze po użytkowniku pobieramy więcej (do 100), potem przycinamy do żądanej liczby
     const paczka = await kanal.messages.fetch({ limit: LIMIT_BULK }).catch(() => null);
