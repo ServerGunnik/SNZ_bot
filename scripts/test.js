@@ -384,17 +384,20 @@ const karty = wymagaj('utils/karty.js');
   backup.usunKopieKanalu('KANAL_B');
   sprawdz(!kopiaB(), 'kopie wiadomości usuniętego kanału są sprzątane');
 
-  const wyrzuceniBoty = [];
+  const ukaraneBoty = [];
   const wiadomoscBota = (autorId, id) => ({
     ...wiadomosc('discord.gg/reklama', id),
     author: { id: autorId, tag: 'b#0', bot: true },
-    member: { user: { bot: true }, kickable: true, kick: async () => wyrzuceniBoty.push(autorId), roles: { cache: new Map() }, permissions: { has: () => false } },
+    member: {
+      user: { bot: true }, bannable: true, kickable: true, roles: { cache: new Map() }, permissions: { has: () => true },
+      ban: async () => ukaraneBoty.push(autorId), kick: async () => ukaraneBoty.push(autorId),
+    },
   });
   await automod.obsluzWiadomosc(wiadomoscBota('OBCYBOT', 'AB1'));
-  sprawdz(usuniete.includes('AB1') && wyrzuceniBoty.includes('OBCYBOT'), 'automod wyrzuca spamującego obcego bota');
+  sprawdz(usuniete.includes('AB1') && ukaraneBoty.includes('OBCYBOT'), 'automod banuje spamującego bota');
   antynuke.dodajDoWhitelisty('ZAUFANYBOT', 'WLASCICIEL');
   await automod.obsluzWiadomosc(wiadomoscBota('ZAUFANYBOT', 'AB2'));
-  sprawdz(!usuniete.includes('AB2') && !wyrzuceniBoty.includes('ZAUFANYBOT'), 'bot z whitelisty antynuke nie podlega automodowi');
+  sprawdz(usuniete.includes('AB2') && ukaraneBoty.includes('ZAUFANYBOT'), 'bot nie jest pomijany nawet z whitelisty i uprawnieniami moderatora');
 
   const odpClear = [];
   await wymagaj('commands/clear.js').execute({
