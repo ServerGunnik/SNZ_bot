@@ -1,6 +1,7 @@
 const antynuke = require('../modules/antynuke.js');
 const tickety = require('../modules/tickety.js');
 const ochronaKanalow = require('../modules/ochrona-kanalow.js');
+const backupWiadomosci = require('../modules/backup-wiadomosci.js');
 
 module.exports = {
   name: 'channelDelete',
@@ -11,5 +12,7 @@ module.exports = {
     await tickety.obsluzUsuniecieKanalu(kanal).catch((e) => console.error('[channelDelete tickety]', e));
     // Kara za usunięcie kanału + odtworzenie (poza botem/właścicielem/technikami)
     await ochronaKanalow.obsluzUsuniecieKanalu(kanal).catch((e) => console.error('[channelDelete ochrona]', e));
+    // Kopie wiadomości usuniętego kanału (odtworzony kanał ma już nowe ID i własne kopie)
+    backupWiadomosci.usunKopieKanalu(kanal.id);
   },
 };

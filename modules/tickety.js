@@ -32,8 +32,8 @@ const q = {
   zapiszHistorie: db.prepare('UPDATE tickety SET historia_kanal_id = ?, historia_wiad_id = ? WHERE id = ?'),
   zapiszList: db.prepare('UPDATE tickety SET list_id = ? WHERE id = ?'),
   ocen: db.prepare('UPDATE tickety SET ocena = ? WHERE id = ?'),
+  // Notatki z dawnego panelu staffu (zastąpiony kanałem narady) - trafiają jeszcze do historii starszych ticketów
   notatki: db.prepare('SELECT * FROM tickety_notatki WHERE ticket_id = ? ORDER BY id'),
-  dodajNotatke: db.prepare('INSERT INTO tickety_notatki (ticket_id, autor_id, tresc, data) VALUES (?, ?, ?, ?)'),
 };
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
@@ -366,45 +366,6 @@ async function onWystawList(interaction) {
   });
 }
 
-// ---- Panel staffu: notatki niewidoczne dla gracza ----------------------
-// Notatki nie są wiadomościami na kanale - staff widzi je wyłącznie w odpowiedzi
-// widocznej tylko dla siebie (ephemeral), a po zamknięciu trafiają do historii i transkryptu.
-
-async function onPanelStaffu(interaction) {
-  const [, , idStr] = interaction.customId.split(':');
-  const ticket = ticketDlaStaffu(interaction, idStr);
-  if (!ticket) return;
-  const payload = karty.kartaNotatekTicketu({ ticketId: ticket.id, notatki: q.notatki.all(ticket.id), naradaId: ticket.narada_id });
-  // "Odśwież" w otwartym już panelu podmienia tę samą prywatną wiadomość
-  if (interaction.message?.flags?.has(MessageFlags.Ephemeral)) return interaction.update(payload);
-  await interaction.reply({ ...payload, flags: EPHEMERAL_V2 });
-}
-
-async function onDodajNotatke(interaction) {
-  const [, , idStr] = interaction.customId.split(':');
-  const ticket = ticketDlaStaffu(interaction, idStr);
-  if (!ticket) return;
-  const modal = new ModalBuilder()
-    .setCustomId(`ticket:notatka-modal:${ticket.id}`)
-    .setTitle('Notatka staffu (gracz jej nie widzi)');
-  modal.addComponents(new ActionRowBuilder().addComponents(
-    new TextInputBuilder().setCustomId('tresc').setLabel('Treść notatki')
-      .setStyle(TextInputStyle.Paragraph).setMinLength(2).setMaxLength(500).setRequired(true)
-  ));
-  await interaction.showModal(modal);
-}
-
-async function onNotatkaModal(interaction) {
-  const [, , idStr] = interaction.customId.split(':');
-  const ticket = ticketDlaStaffu(interaction, idStr);
-  if (!ticket) return;
-  q.dodajNotatke.run(ticket.id, interaction.user.id, interaction.fields.getTextInputValue('tresc').trim(), Date.now());
-  const payload = karty.kartaNotatekTicketu({ ticketId: ticket.id, notatki: q.notatki.all(ticket.id), naradaId: ticket.narada_id });
-  // Odśwież listę notatek w tej samej prywatnej wiadomości
-  if (interaction.isFromMessage()) return interaction.update(payload);
-  return interaction.reply({ ...payload, flags: EPHEMERAL_V2 });
-}
-
 // ---- Zamykanie: wynik -> wyjaśnienie -> historia ------------------------
 
 async function onZamknij(interaction) {
@@ -611,9 +572,6 @@ async function onOcena(interaction) {
 function rejestruj({ zarejestruj }) {
   zarejestruj('ticket:kategoria', onKategoriaSelect);
   zarejestruj('ticket:formularz', onFormularz);
-  zarejestruj('ticket:notatki', onPanelStaffu);
-  zarejestruj('ticket:notatka-dodaj', onDodajNotatke);
-  zarejestruj('ticket:notatka-modal', onNotatkaModal);
   zarejestruj('ticket:przejmij', onPrzejmij);
   zarejestruj('ticket:wystaw-list', onWystawList);
   zarejestruj('ticket:zamknij', onZamknij);
