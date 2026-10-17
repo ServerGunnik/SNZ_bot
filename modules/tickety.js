@@ -79,6 +79,17 @@ function informacjeONickach(ticket) {
   return linie;
 }
 
+// Odświeża kartę ticketu (edytuje wiadomość z przyciskami w kanale ticketu) po zmianie przydzielonego
+async function odswiezKarteTicketu(client, ticketId) {
+  const ticket = q.poId.get(ticketId);
+  if (!ticket?.kanal_id || !ticket?.wiadomosc_id) return;
+  const kanal = await client.channels.fetch(ticket.kanal_id).catch(() => null);
+  if (!kanal) return;
+  const wiad = await kanal.messages.fetch(ticket.wiadomosc_id).catch(() => null);
+  if (!wiad) return;
+  await wiad.edit(kartaDlaTicketu(ticket)).catch(() => null);
+}
+
 function kartaDlaTicketu(ticket) {
   const kategoria = znajdzKategorie(ticket.kategoria_kod);
   return karty.kartaTicketu({
@@ -614,4 +625,4 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('ticket:ocena', onOcena);
 }
 
-module.exports = { rejestruj, obsluzUsuniecieKanalu, zarejestrujAktywnosc, uruchomZadaniaTicketow, sprawdzTickety };
+module.exports = { rejestruj, obsluzUsuniecieKanalu, zarejestrujAktywnosc, uruchomZadaniaTicketow, sprawdzTickety, odswiezKarteTicketu };

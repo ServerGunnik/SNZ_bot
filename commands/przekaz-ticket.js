@@ -4,6 +4,7 @@ const karty = require('../utils/karty.js');
 const { maDostepDoModeracji, rangaStaffu } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const { odswiezKarteTicketu } = require('../modules/tickety.js');
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
@@ -73,6 +74,8 @@ module.exports = {
 
     const poprzedni = ticket.przydzielony;
     q.przydziel.run(docelowy.id, ticket.id);
+    // Odśwież kartę z przyciskami - inaczej dalej pokazuje poprzedniego "Obsługuje"
+    await odswiezKarteTicketu(interaction.client, ticket.id);
 
     const tytul = poprzedni ? 'Ticket przekazany' : 'Ticket przypisany';
     const opis = poprzedni
