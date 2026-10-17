@@ -34,6 +34,8 @@ const q = {
   ocen: db.prepare('UPDATE tickety SET ocena = ? WHERE id = ?'),
   // Notatki z dawnego panelu staffu (zastąpiony kanałem narady) - trafiają jeszcze do historii starszych ticketów
   notatki: db.prepare('SELECT * FROM tickety_notatki WHERE ticket_id = ? ORDER BY id'),
+  eskaluj: db.prepare('UPDATE tickety SET eskalowany_przez = ?, eskalowany_z_rangi = ?, przydzielony = NULL WHERE id = ?'),
+  wyczyscEskalacje: db.prepare('UPDATE tickety SET eskalowany_przez = NULL, eskalowany_z_rangi = NULL WHERE id = ?'),
 };
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
@@ -254,11 +256,18 @@ async function onPrzejmij(interaction) {
     return odpowiedz(interaction, karty.kartaOstrzezenie('Już Twoje', 'To zgłoszenie już obsługujesz.'));
   }
 
+  const mojaRanga = rangaStaffu(interaction.member);
+
+  // Ticket eskalowany komendą /przekaz-wyzej - tylko wyższa ranga może przejąć (nawet jeśli nikt go nie trzyma)
+  if (ticket.eskalowany_przez && ticket.eskalowany_z_rangi != null && mojaRanga <= ticket.eskalowany_z_rangi) {
+    return odpowiedz(interaction, karty.kartaOstrzezenie('Eskalowane wyżej',
+      `Ticket został przekazany wyżej przez <@${ticket.eskalowany_przez}>. Przejąć może tylko osoba z wyższą rangą.`));
+  }
+
   let poprzedni = null;
   if (ticket.przydzielony) {
     // Hierarchia: wyższa ranga (wg pozycji roli) może zabrać ticket niższej.
     // Właściciel/technik mają rangę Infinity i mogą zabrać dowolny.
-    const mojaRanga = rangaStaffu(interaction.member);
     const obecnyCzlonek = await interaction.guild.members.fetch(ticket.przydzielony).catch(() => null);
     const obecnaRanga = obecnyCzlonek ? rangaStaffu(obecnyCzlonek) : 0;
     if (mojaRanga <= obecnaRanga) {
@@ -268,6 +277,8 @@ async function onPrzejmij(interaction) {
     poprzedni = ticket.przydzielony;
   }
 
+  // Przejęcie czyści flagę eskalacji - od teraz nowy właściciel ponownie decyduje
+  q.wyczyscEskalacje.run(ticket.id);
   q.przydziel.run(interaction.user.id, ticket.id);
   await interaction.update(kartaDlaTicketu({ ...ticket, przydzielony: interaction.user.id }));
   const tytulInfo = poprzedni ? 'Zgłoszenie przejęte od innego moderatora' : 'Zgłoszenie przejęte';

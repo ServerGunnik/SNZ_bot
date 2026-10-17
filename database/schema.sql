@@ -247,6 +247,26 @@ CREATE TABLE IF NOT EXISTS boty_uprawnienia (
   data INTEGER NOT NULL
 );
 
+-- BLOKADY AUTOMOD: globalne przełączniki na obrazki/gify/załączniki/linki itp.
+CREATE TABLE IF NOT EXISTS automod_blokady (
+  typ TEXT PRIMARY KEY,              -- np. 'obrazki', 'gify', 'zalaczniki', 'linki'
+  aktywna INTEGER NOT NULL DEFAULT 0,
+  ustawil TEXT,
+  data INTEGER
+);
+
+-- REKRUTACJA: ID kanałów utworzonych przez /recru stworz (do usunięcia przez /recru usun)
+CREATE TABLE IF NOT EXISTS rekrutacja (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kategoria_id TEXT,
+  poczekalnia_id TEXT NOT NULL,
+  pokoj_id TEXT NOT NULL,
+  utworzyl TEXT NOT NULL,
+  utworzono INTEGER NOT NULL,
+  aktywna INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_rekrutacja_aktywna ON rekrutacja(aktywna);
+
 -- ANKIETY ANONIMOWE: bot sam liczy głosy, nigdy nie pokazuje kto na co głosował.
 -- Natywne ankiety Discorda (bez tej tabeli) i tak pokazują listę głosujących - dla nich używamy Discord Poll API.
 CREATE TABLE IF NOT EXISTS ankiety (

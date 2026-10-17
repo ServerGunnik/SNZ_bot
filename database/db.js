@@ -36,6 +36,9 @@ dodajKolumne('listy_zgloszenia', 'zglaszajacy_dodany', 'INTEGER DEFAULT 0');
 db.exec(`UPDATE sprawy SET status = CASE WHEN sedzia_id IS NULL THEN 'zlozona' ELSE 'w_toku' END WHERE status = 'odwolanie'`);
 dodajKolumne('panstwa', 'sojusznik', 'INTEGER NOT NULL DEFAULT 1');
 dodajKolumne('panstwa_czlonkowie', 'status', "TEXT NOT NULL DEFAULT 'czlonek'");
+// Eskalacja ticketu przez /przekaz-wyzej - zapamiętana ranga blokuje przejęcie przez równych/niższych
+dodajKolumne('tickety', 'eskalowany_przez', 'TEXT');
+dodajKolumne('tickety', 'eskalowany_z_rangi', 'INTEGER');
 
 db.sciezka = dbPath;
 

@@ -5,6 +5,7 @@ const config = require('../config.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const blokady = require('./blokady.js');
 
 const ZAPROSZENIE = /(discord\.gg|discord(?:app)?\.com\/invite)\/[\w-]+/i;
 const EVERYONE = /@(everyone|here)\b/i;
@@ -110,6 +111,10 @@ async function obsluzWiadomosc(wiadomosc) {
   const cfg = config.automod;
   const tresc = wiadomosc.content || '';
   const ta = [{ id: wiadomosc.id, kanal: wiadomosc.channel }];
+
+  // Globalne blokady typów treści (gify/obrazki/linki/załączniki/video) ustawiane komendą /blok
+  const typBlokady = blokady.sprawdzNaruszenie(wiadomosc);
+  if (typBlokady) return naruszenie(wiadomosc, `blokada globalna: ${blokady.etykietaTypu(typBlokady)}`, ta);
 
   if (cfg.blokujEveryone && EVERYONE.test(tresc)) return naruszenie(wiadomosc, 'próba oznaczenia @everyone/@here', ta);
   if (cfg.blokujZaproszenia && ZAPROSZENIE.test(tresc)) return naruszenie(wiadomosc, 'zaproszenie na inny serwer Discord', ta);

@@ -21,6 +21,7 @@ module.exports = {
     require('../modules/ochrona-logow.js').uruchomOchrone(client);
     require('../modules/ochrona-kanalow.js').uruchomOchrone(client);
     require('../modules/ankiety.js').uruchomCyklZamykania(client);
+    require('../modules/blokady.js').uruchomBlokady();
     require('../modules/blokada-botow.js').sprawdzPoUruchomieniu(client)
       .catch((e) => console.error('[ready] blokada botów', e));
     await require('../modules/wolanie-moda.js').przywrocWezwania(client)
