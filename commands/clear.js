@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require('discord.js');
 const karty = require('../utils/karty.js');
-const { jestStaff } = require('../utils/uprawnienia.js');
+const { maDostepDoModeracji } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 const { chronionyKanal } = require('../modules/ochrona-logow.js');
@@ -24,8 +24,8 @@ module.exports = {
     // Defer PIERWSZE - Discord daje 3s na pierwszą odpowiedź, jak zrobimy sprawdzenia przed, to możemy nie zdążyć
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (!jestStaff(interaction.member)) {
-      return interaction.editReply(karty.kartaBlad('Brak uprawnień', 'Ta komenda jest dla staffu.'));
+    if (!maDostepDoModeracji(interaction.member)) {
+      return interaction.editReply(karty.kartaBlad('Brak uprawnień', 'Komenda dla staffu i helperów.'));
     }
 
     const kanal = interaction.channel;

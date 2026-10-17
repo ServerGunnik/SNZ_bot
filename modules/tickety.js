@@ -5,7 +5,7 @@ const {
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestStaff, wszechwladny, maRole } = require('../utils/uprawnienia.js');
+const { jestStaff, wszechwladny, maRole, maDostepDoModeracji, rangaStaffu } = require('../utils/uprawnienia.js');
 const { walidujNick } = require('../utils/minecraft.js');
 const { log } = require('../utils/logger.js');
 const { transkrypt } = require('../utils/transkrypt.js');
@@ -123,9 +123,9 @@ async function resetujPanel(interaction) {
   await wiad.edit(karty.panelTicketow(config.tickety.kategorie)).catch(() => null);
 }
 
-// Ticket otwarty, a klikający jest staffem - w przeciwnym razie odpowiada błędem i zwraca null
+// Ticket otwarty, a klikający jest staffem/helperem - w przeciwnym razie odpowiada błędem i zwraca null
 function ticketDlaStaffu(interaction, idStr) {
-  if (!jestStaff(interaction.member)) {
+  if (!maDostepDoModeracji(interaction.member)) {
     odpowiedz(interaction, karty.kartaBlad('Brak uprawnień', 'Ta akcja jest dostępna tylko dla administracji.'));
     return null;
   }
@@ -250,22 +250,38 @@ async function onFormularz(interaction) {
 async function onPrzejmij(interaction) {
   const ticket = ticketDlaStaffu(interaction);
   if (!ticket) return;
-  if (ticket.przydzielony) {
-    return odpowiedz(interaction, karty.kartaOstrzezenie('Już przejęte', `To zgłoszenie obsługuje już <@${ticket.przydzielony}>.`));
+  if (ticket.przydzielony === interaction.user.id) {
+    return odpowiedz(interaction, karty.kartaOstrzezenie('Już Twoje', 'To zgłoszenie już obsługujesz.'));
   }
+
+  let poprzedni = null;
+  if (ticket.przydzielony) {
+    // Hierarchia: wyższa ranga (wg pozycji roli) może zabrać ticket niższej.
+    // Właściciel/technik mają rangę Infinity i mogą zabrać dowolny.
+    const mojaRanga = rangaStaffu(interaction.member);
+    const obecnyCzlonek = await interaction.guild.members.fetch(ticket.przydzielony).catch(() => null);
+    const obecnaRanga = obecnyCzlonek ? rangaStaffu(obecnyCzlonek) : 0;
+    if (mojaRanga <= obecnaRanga) {
+      return odpowiedz(interaction, karty.kartaOstrzezenie('Już przejęte',
+        `To zgłoszenie obsługuje <@${ticket.przydzielony}>. Przejąć może tylko osoba z wyższą rangą albo właściciel/technik.`));
+    }
+    poprzedni = ticket.przydzielony;
+  }
+
   q.przydziel.run(interaction.user.id, ticket.id);
   await interaction.update(kartaDlaTicketu({ ...ticket, przydzielony: interaction.user.id }));
-  const info = karty.kartaInfo({
-    tytul: 'Zgłoszenie przejęte',
-    opis: `Twoim zgłoszeniem zajmuje się <@${interaction.user.id}>.`,
-    kolor: kolory.info,
-  });
+  const tytulInfo = poprzedni ? 'Zgłoszenie przejęte od innego moderatora' : 'Zgłoszenie przejęte';
+  const opisInfo = poprzedni
+    ? `Teraz obsługuje <@${interaction.user.id}> (zabrał od <@${poprzedni}>).`
+    : `Twoim zgłoszeniem zajmuje się <@${interaction.user.id}>.`;
+  const info = karty.kartaInfo({ tytul: tytulInfo, opis: opisInfo, kolor: kolory.info });
   await interaction.channel.send({ ...info, allowedMentions: { parse: [] } }).catch(() => null);
   const narada = ticket.narada_id && interaction.guild.channels.cache.get(ticket.narada_id);
-  if (narada) await narada.send({ ...karty.kartaInfo({ tytul: 'Przejęto zgłoszenie', opis: `Obsługuje: <@${interaction.user.id}>`, kolor: kolory.info }), allowedMentions: { parse: [] } }).catch(() => null);
+  if (narada) await narada.send({ ...karty.kartaInfo({ tytul: tytulInfo, opis: `Obsługuje: <@${interaction.user.id}>${poprzedni ? ` (zabrał od <@${poprzedni}>)` : ''}`, kolor: kolory.info }), allowedMentions: { parse: [] } }).catch(() => null);
   await log(interaction.client, {
-    tytul: `Przejęto zgłoszenie #${ticket.id}`,
-    opis: `**Kanał:** <#${ticket.kanal_id}>\n**Obsługuje:** <@${interaction.user.id}>`,
+    tytul: poprzedni ? `Przejęto zgłoszenie #${ticket.id} (zabrane)` : `Przejęto zgłoszenie #${ticket.id}`,
+    opis: `**Kanał:** <#${ticket.kanal_id}>\n**Obsługuje:** <@${interaction.user.id}>` +
+      (poprzedni ? `\n**Zabrane od:** <@${poprzedni}>` : ''),
     kolor: kolory.info,
     kanal: 'logiTickety',
   });

@@ -30,6 +30,26 @@ const jestStaff = (member) => wszechwladny(member) || maRole(member, config.role
 const jestLider = (member) => wszechwladny(member) || maRole(member, config.role.lider);
 const jestSedzia = (member) => wszechwladny(member) || maRole(member, config.role.sedzia);
 const jestZweryfikowany = (member) => wszechwladny(member) || maRole(member, config.role.zweryfikowany);
+// Junior staff - helper. Nie przechodzi standardowego `jestStaff`.
+const jestHelperem = (member) => maRole(member, config.role.helper);
+// Dostęp do podstawowej moderacji (mute/ban/clear) i obsługi ticketów - zarówno staff, jak i helper
+const maDostepDoModeracji = (member) => jestStaff(member) || jestHelperem(member);
+
+// Ranga oparta o pozycję roli na serwerze. Wyższa pozycja = wyższa ranga.
+// Właściciel i technik = Infinity. Osoby bez żadnej uznawanej roli staffu/helpera = 0.
+function rangaStaffu(member) {
+  if (!member) return 0;
+  if (wszechwladny(member)) return Infinity;
+  const idRozpoznawane = new Set([
+    ...config.role.staff,
+    ...config.role.helper,
+    ...config.role.lider,
+    ...config.role.sedzia,
+  ]);
+  const role = [...member.roles.cache.values()].filter(r => idRozpoznawane.has(r.id));
+  if (!role.length) return 0;
+  return Math.max(...role.map(r => r.position));
+}
 
 // Uprawnienia, które pozwalają zniszczyć serwer - pilnuje ich antynuke i selfrole
 const UPRAWNIENIA_ADMINISTRACYJNE = [
@@ -62,5 +82,6 @@ const rolaAdministracyjna = (rola) => Boolean(rola) && maUprawnienia(rola.permis
 
 module.exports = {
   maRole, pingRol, wszechwladny, jestStaff, jestLider, jestSedzia, jestZweryfikowany,
+  jestHelperem, maDostepDoModeracji, rangaStaffu,
   UPRAWNIENIA_ADMINISTRACYJNE, UPRAWNIENIA_NIE_DLA_SELFROLE, maUprawnienia, rolaAdministracyjna,
 };
