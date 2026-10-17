@@ -32,8 +32,11 @@ const jestSedzia = (member) => wszechwladny(member) || maRole(member, config.rol
 const jestZweryfikowany = (member) => wszechwladny(member) || maRole(member, config.role.zweryfikowany);
 // Junior staff - helper. Nie przechodzi standardowego `jestStaff`.
 const jestHelperem = (member) => maRole(member, config.role.helper);
-// Dostęp do podstawowej moderacji (mute/ban/clear) i obsługi ticketów - zarówno staff, jak i helper
+// Dostęp do podstawowej moderacji (mute/clear) i obsługi ticketów - zarówno staff, jak i helper
 const maDostepDoModeracji = (member) => jestStaff(member) || jestHelperem(member);
+// /ban + /unban - tylko wyższe rangi (konfigurowane przez ROLA_BAN) + właściciel + technik.
+// Zabiera prawo banowania helperom i jr adminom, chyba że są wpisani w ROLA_BAN.
+const mozeBanowac = (member) => wszechwladny(member) || maRole(member, config.role.ban);
 
 // Ranga oparta o pozycję roli na serwerze. Wyższa pozycja = wyższa ranga.
 // Właściciel i technik = Infinity. Osoby bez żadnej uznawanej roli staffu/helpera = 0.
@@ -82,6 +85,6 @@ const rolaAdministracyjna = (rola) => Boolean(rola) && maUprawnienia(rola.permis
 
 module.exports = {
   maRole, pingRol, wszechwladny, jestStaff, jestLider, jestSedzia, jestZweryfikowany,
-  jestHelperem, maDostepDoModeracji, rangaStaffu,
+  jestHelperem, maDostepDoModeracji, mozeBanowac, rangaStaffu,
   UPRAWNIENIA_ADMINISTRACYJNE, UPRAWNIENIA_NIE_DLA_SELFROLE, maUprawnienia, rolaAdministracyjna,
 };

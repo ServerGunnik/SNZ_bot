@@ -45,9 +45,12 @@ module.exports = {
     modPing: listaId(process.env.ROLA_MOD_PING || process.env.ROLA_STAFF),
     // Mogą zamykać ticket niezależnie od tego, czy go przyjęli (poza nimi może tylko osoba, która przejęła)
     zamykaczTicketu: listaId(process.env.ROLA_ZAMYKACZ_TICKETU),
-    // Junior staff: dostęp tylko do mute/ban/clear i obsługi ticketów. Nie ma dostępu do państw, warnów,
-    // list gończych, antynuke itp. - te zostają dla pełnego staffu (ROLA_STAFF).
+    // Junior staff: dostęp tylko do mute/clear i obsługi ticketów. Nie ma dostępu do państw, warnów,
+    // list gończych, antynuke, /ban itp. - te zostają dla pełnego staffu (ROLA_STAFF).
     helper: listaId(process.env.ROLA_HELPER),
+    // Role uprawnione do /ban i /unban. Jeśli puste - tylko właściciel i technik.
+    // Zalecenie: wpisz tu tylko wyższe rangi (Admin, Head Admin, Vice Owner), bez Jr Admina i helpera.
+    ban: listaId(process.env.ROLA_BAN),
   },
 
   weryfikacja: {

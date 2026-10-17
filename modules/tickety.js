@@ -210,6 +210,7 @@ async function onFormularz(interaction) {
 
   const kategoriaKanal = config.kanaly.kategoriaTickety || interaction.channel?.parentId;
   const staffRole = config.role.staff;
+  const helperRole = config.role.helper;
   const nickPole = pola.find(p => kategoria.pola.find(k => k.id === p.id)?.nick);
   const temat = `${kategoria.label}${nickPole?.wartosc ? `: ${nickPole.wartosc}` : ''}`;
 
@@ -222,17 +223,21 @@ async function onFormularz(interaction) {
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.client.user.id, allow: DOSTEP_BOTA },
       { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] },
+      // Pełny staff: pisanie + zarządzanie wiadomościami
       ...staffRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory] })),
+      // Helper: pisanie + załączniki, bez ManageMessages (nie może usuwać/przypinać cudzych wiadomości)
+      ...helperRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
     ],
   });
 
   const info = q.wstaw.run(kanal.id, interaction.user.id, kategoria.label, kategoria.value, JSON.stringify(pola), temat, Date.now());
   const ticket = q.poId.get(info.lastInsertRowid);
 
-  const pingStaff = staffRole.length ? ` ${staffRole.map(id => `<@&${id}>`).join(' ')}` : '';
+  const rolaDoPingu = [...staffRole, ...helperRole];
+  const pingStaff = rolaDoPingu.length ? ` ${rolaDoPingu.map(id => `<@&${id}>`).join(' ')}` : '';
   await kanal.send({
     content: `<@${interaction.user.id}>${pingStaff}`,
-    allowedMentions: { users: [interaction.user.id], roles: staffRole },
+    allowedMentions: { users: [interaction.user.id], roles: rolaDoPingu },
   });
   const karta = await kanal.send(kartaDlaTicketu(ticket));
   q.zapiszWiadomosc.run(karta.id, ticket.id);
@@ -308,6 +313,7 @@ function nazwaNarady(username, ticketId) {
 
 async function utworzNarade(interaction, ticket) {
   const staffRole = config.role.staff;
+  const helperRole = config.role.helper;
   const narada = await interaction.guild.channels.create({
     name: nazwaNarady(interaction.user.username, ticket.id),
     type: ChannelType.GuildText,
@@ -317,6 +323,7 @@ async function utworzNarade(interaction, ticket) {
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.client.user.id, allow: DOSTEP_BOTA },
       ...staffRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
+      ...helperRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
     ],
   });
   q.zapiszNarade.run(narada.id, ticket.id);
