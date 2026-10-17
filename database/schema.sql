@@ -247,6 +247,32 @@ CREATE TABLE IF NOT EXISTS boty_uprawnienia (
   data INTEGER NOT NULL
 );
 
+-- ANKIETY ANONIMOWE: bot sam liczy głosy, nigdy nie pokazuje kto na co głosował.
+-- Natywne ankiety Discorda (bez tej tabeli) i tak pokazują listę głosujących - dla nich używamy Discord Poll API.
+CREATE TABLE IF NOT EXISTS ankiety (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pytanie TEXT NOT NULL,
+  opcje TEXT NOT NULL,            -- JSON: [string]
+  wiele INTEGER NOT NULL DEFAULT 0,  -- 0 = jeden wybór, 1 = wiele
+  kanal_id TEXT NOT NULL,
+  wiadomosc_id TEXT,
+  autor_id TEXT NOT NULL,
+  utworzono INTEGER NOT NULL,
+  konczy INTEGER NOT NULL,
+  zamknieta INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ankiety_konczy ON ankiety(zamknieta, konczy);
+
+CREATE TABLE IF NOT EXISTS ankiety_glosy (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ankieta_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  opcja_idx INTEGER NOT NULL,
+  UNIQUE(ankieta_id, user_id, opcja_idx),
+  FOREIGN KEY(ankieta_id) REFERENCES ankiety(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_glosy_ankieta ON ankiety_glosy(ankieta_id);
+
 -- Proste ustawienia klucz-wartość
 CREATE TABLE IF NOT EXISTS stan (
   klucz TEXT PRIMARY KEY,
