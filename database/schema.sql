@@ -255,6 +255,16 @@ CREATE TABLE IF NOT EXISTS automod_blokady (
   data INTEGER
 );
 
+-- FILTRY TEKSTOWE: konkretne słowa/frazy/regexy do blokowania w automodzie
+CREATE TABLE IF NOT EXISTS automod_filtry (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  typ TEXT NOT NULL,                 -- 'slowo' | 'fraza' | 'regex'
+  tresc TEXT NOT NULL,
+  dodal TEXT NOT NULL,
+  data INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automod_filtry_typ ON automod_filtry(typ);
+
 -- REKRUTACJA: ID kanałów utworzonych przez /recru stworz (do usunięcia przez /recru usun)
 CREATE TABLE IF NOT EXISTS rekrutacja (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

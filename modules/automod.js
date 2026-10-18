@@ -112,9 +112,13 @@ async function obsluzWiadomosc(wiadomosc) {
   const tresc = wiadomosc.content || '';
   const ta = [{ id: wiadomosc.id, kanal: wiadomosc.channel }];
 
-  // Globalne blokady typów treści (gify/obrazki/linki/załączniki/video) ustawiane komendą /blok
+  // Globalne blokady typów treści (gify/obrazki/linki/załączniki/video) ustawiane komendą /block
   const typBlokady = blokady.sprawdzNaruszenie(wiadomosc);
   if (typBlokady) return naruszenie(wiadomosc, `blokada globalna: ${blokady.etykietaTypu(typBlokady)}`, ta);
+
+  // Filtry tekstowe (słowa/frazy/regexy) dodane komendą /block dodaj
+  const filtr = blokady.sprawdzFiltry(wiadomosc);
+  if (filtr) return naruszenie(wiadomosc, `zablokowana treść (${filtr.typ}): „${filtr.tresc.slice(0, 60)}"`, ta);
 
   if (cfg.blokujEveryone && EVERYONE.test(tresc)) return naruszenie(wiadomosc, 'próba oznaczenia @everyone/@here', ta);
   if (cfg.blokujZaproszenia && ZAPROSZENIE.test(tresc)) return naruszenie(wiadomosc, 'zaproszenie na inny serwer Discord', ta);

@@ -6,6 +6,10 @@ const q = {
   wszystkie: db.prepare('SELECT typ, aktywna FROM automod_blokady'),
   ustaw: db.prepare(`INSERT INTO automod_blokady (typ, aktywna, ustawil, data) VALUES (?, ?, ?, ?)
     ON CONFLICT(typ) DO UPDATE SET aktywna = excluded.aktywna, ustawil = excluded.ustawil, data = excluded.data`),
+  wszystkieFiltry: db.prepare('SELECT * FROM automod_filtry ORDER BY id'),
+  dodajFiltr: db.prepare('INSERT INTO automod_filtry (typ, tresc, dodal, data) VALUES (?, ?, ?, ?)'),
+  usunFiltr: db.prepare('DELETE FROM automod_filtry WHERE id = ?'),
+  filtrPoId: db.prepare('SELECT * FROM automod_filtry WHERE id = ?'),
 };
 
 // Dostępne typy + opisy (do UI komend i decyzji w automodzie)
@@ -19,10 +23,34 @@ const TYPY = {
 
 // Cache w pamięci dla szybkich sprawdzeń przy KAŻDEJ wiadomości - DB tylko przy zapisie/starcie
 const cache = new Map();
+// Filtry tekstowe: [{ id, typ: 'slowo'|'fraza'|'regex', tresc, regex (skompilowane) }]
+let filtry = [];
+
+function kompilujFiltr(f) {
+  if (f.typ === 'slowo') {
+    // Match jako całe słowo, case-insensitive. Dla znaków niealfanumerycznych granica \b nie zadziała,
+    // więc fallback na substring. Escape metacharacters.
+    const esc = f.tresc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return { ...f, regex: new RegExp(`\\b${esc}\\b`, 'i') };
+  }
+  if (f.typ === 'fraza') {
+    const esc = f.tresc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return { ...f, regex: new RegExp(esc, 'i') };
+  }
+  if (f.typ === 'regex') {
+    try {
+      return { ...f, regex: new RegExp(f.tresc, 'i') };
+    } catch {
+      return { ...f, regex: null };
+    }
+  }
+  return { ...f, regex: null };
+}
 
 function zaladujZDb() {
   cache.clear();
   for (const w of q.wszystkie.all()) cache.set(w.typ, Boolean(w.aktywna));
+  filtry = q.wszystkieFiltry.all().map(kompilujFiltr);
 }
 
 function czyAktywna(typ) {
@@ -72,6 +100,39 @@ function sprawdzNaruszenie(wiadomosc) {
   return null;
 }
 
+// Sprawdza wiadomość przeciwko filtrom tekstowym. Zwraca pierwszy pasujący filtr albo null.
+function sprawdzFiltry(wiadomosc) {
+  const tresc = wiadomosc.content || '';
+  if (!tresc) return null;
+  for (const f of filtry) {
+    if (f.regex && f.regex.test(tresc)) return f;
+  }
+  return null;
+}
+
+function dodajFiltr(typ, tresc, dodalId) {
+  const info = q.dodajFiltr.run(typ, tresc, dodalId, Date.now());
+  filtry.push(kompilujFiltr({ id: info.lastInsertRowid, typ, tresc, dodal: dodalId, data: Date.now() }));
+  return info.lastInsertRowid;
+}
+
+function usunFiltr(id) {
+  const info = q.usunFiltr.run(id);
+  if (info.changes > 0) {
+    filtry = filtry.filter(f => f.id !== id);
+    return true;
+  }
+  return false;
+}
+
+function filtrPoId(id) {
+  return q.filtrPoId.get(id);
+}
+
+function listaFiltrow() {
+  return filtry.map(f => ({ id: f.id, typ: f.typ, tresc: f.tresc, dodal: f.dodal, data: f.data }));
+}
+
 function etykietaTypu(typ) {
   return TYPY[typ]?.label || typ;
 }
@@ -94,4 +155,5 @@ module.exports = {
   rejestruj, uruchomBlokady,
   czyAktywna, ustawStan, listaStanow, sprawdzNaruszenie, dostepneTypy,
   etykietaTypu, emojiTypu,
+  sprawdzFiltry, dodajFiltr, usunFiltr, filtrPoId, listaFiltrow,
 };
