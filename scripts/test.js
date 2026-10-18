@@ -196,7 +196,8 @@ const karty = wymagaj('utils/karty.js');
   await otwieraModal('list:zglos:1');
   await otwieraModal('list:nagroda:1');
   await otwieraModal('list:edytuj:1');
-  await otwieraModal('sad:wyrok:1');
+  // Nowy flow wyroku: najpierw panel wyboru "kogo dotyczy", modal po kliknięciu typu
+  await otwieraModal('sad:wyrok-wobec:1:pozwany');
   await otwieraModal('sad:dowod:1');
   await otwieraModal('panstwo:dodaj:1', gracz, { user: { id: 'KROL', username: 'krol' } });
   await otwieraModal('weryfikacja:start', gracz);

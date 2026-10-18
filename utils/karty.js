@@ -639,6 +639,23 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   return { components: [c], ...FLAGS_V2 };
 }
 
+// Słowniki do kart wyroków
+const WYROK_WOBEC_ETYKIETY = {
+  oskarzajacy: 'Oskarżający',
+  pozwany: 'Pozwany',
+  oboje: 'Oboje (oskarżający i pozwany)',
+  uniewinniony: 'Uniewinniony',
+  usunieta: 'Sprawa usunięta / anulowana',
+};
+
+const WYROK_WOBEC_EMOJI = {
+  oskarzajacy: '⚖️',
+  pozwany: '🔨',
+  oboje: '👥',
+  uniewinniony: '🕊️',
+  usunieta: '🗑️',
+};
+
 function kartaWyroku({ sprawa }) {
   const c = kontener(kolory.sukces);
   c.addTextDisplayComponents(tekst(`## Wyrok w sprawie ${sprawa.numer}`));
@@ -647,10 +664,48 @@ function kartaWyroku({ sprawa }) {
     `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
     `**Pozwany:** ${opisPozwanego(sprawa)}\n` +
     `**Sędzia:** <@${sprawa.sedzia_id}>\n` +
-    `**Data wyroku:** <t:${Math.floor(sprawa.wyrok_data / 1000)}:f>`
+    `**Data wyroku:** <t:${Math.floor(sprawa.wyrok_data / 1000)}:f>` +
+    (sprawa.wyrok_wobec ? `\n**Wyrok wobec:** ${WYROK_WOBEC_EMOJI[sprawa.wyrok_wobec] || ''} ${WYROK_WOBEC_ETYKIETY[sprawa.wyrok_wobec] || sprawa.wyrok_wobec}` : '')
   ));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(`**Werdykt:** ${sprawa.werdykt}\n**Kara:** ${sprawa.kara}`));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Krok 1 wydawania wyroku: wybór kogo dotyczy
+function kartaWyborWerdyktu(sprawaId) {
+  const c = kontener(kolory.ostrzezenie);
+  c.addTextDisplayComponents(tekst('## Wydanie wyroku — krok 1/3'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst('**Wobec kogo kierowany jest wyrok?**'));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(`sad:wyrok-wobec:${sprawaId}:oskarzajacy`, 'Oskarżający', ButtonStyle.Primary, '⚖️'),
+    przycisk(`sad:wyrok-wobec:${sprawaId}:pozwany`, 'Pozwany', ButtonStyle.Primary, '🔨'),
+    przycisk(`sad:wyrok-wobec:${sprawaId}:oboje`, 'Oboje', ButtonStyle.Primary, '👥'),
+  ));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(`sad:wyrok-wobec:${sprawaId}:uniewinniony`, 'Uniewinniony', ButtonStyle.Success, '🕊️'),
+    przycisk(`sad:wyrok-wobec:${sprawaId}:usunieta`, 'Sprawa usunięta', ButtonStyle.Danger, '🗑️'),
+  ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Krok 3 wydawania wyroku: publikować publicznie czy nie
+function kartaPytanieOPublikacje(sprawaId) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## Wydanie wyroku — krok 3/3'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    'Werdykt zapisany. **Czy wyrok ma zostać opublikowany publicznie?**\n\n' +
+    '-# „Tak" — wyrok trafia na kanał z wyrokami (widoczny dla wszystkich).\n' +
+    '-# „Nie" — wyrok zostaje tylko w tym kanale sprawy, dla osób uprawnionych.'
+  ));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk(`sad:wyrok-publikuj:${sprawaId}:tak`, 'Tak — opublikuj', ButtonStyle.Success, '📢'),
+    przycisk(`sad:wyrok-publikuj:${sprawaId}:nie`, 'Nie — pozostaje prywatny', ButtonStyle.Secondary, '🔒'),
+  ));
   return { components: [c], ...FLAGS_V2 };
 }
 
@@ -750,7 +805,8 @@ module.exports = {
   kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku, kartaNarady,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
   kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow, kartaDowodowZatrzymania, kartaPotwierdzeniaNagrody,
-  kartaSprawy, kartaWyroku,
+  kartaSprawy, kartaWyroku, kartaWyborWerdyktu, kartaPytanieOPublikacje,
+  WYROK_WOBEC_ETYKIETY, WYROK_WOBEC_EMOJI,
   kartaModCall, kartaPowitania,
   panelSelfrole,
   kartaOstrzezen,

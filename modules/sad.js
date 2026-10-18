@@ -17,7 +17,8 @@ const q = {
   // Przypisanie tylko, gdy sprawa nadal nie ma sędziego (dwóch klikających naraz nie nadpisze sobie sprawy)
   przypisz: db.prepare("UPDATE sprawy SET sedzia_id = ?, status = 'w_toku' WHERE id = ? AND status = 'zlozona' AND sedzia_id IS NULL"),
   zmienSedziego: db.prepare('UPDATE sprawy SET sedzia_id = ?, poprzedni_sedzia = ? WHERE id = ?'),
-  wydajWyrok: db.prepare("UPDATE sprawy SET werdykt = ?, kara = ?, status = 'wyrok', wyrok_data = ? WHERE id = ?"),
+  wydajWyrok: db.prepare("UPDATE sprawy SET werdykt = ?, kara = ?, wyrok_wobec = ?, status = 'wyrok', wyrok_data = ? WHERE id = ?"),
+  ustawPubliczny: db.prepare('UPDATE sprawy SET wyrok_publiczny = ? WHERE id = ?'),
   zamknij: db.prepare("UPDATE sprawy SET status = 'zamknieta', zamknieta = ? WHERE id = ?"),
   wstawDowod: db.prepare('INSERT INTO sprawy_dowody (sprawa_id, user_id, tresc, data) VALUES (?, ?, ?, ?)'),
   dowody: db.prepare('SELECT * FROM sprawy_dowody WHERE sprawa_id = ? ORDER BY id'),
@@ -219,6 +220,7 @@ async function onDowodModal(interaction) {
 
 // ---- Wyrok (ostateczny - bez odwołań) ----------------------------------
 
+// Krok 1: panel wyboru kogo dotyczy wyrok
 async function onWyrok(interaction) {
   const [, , idStr] = interaction.customId.split(':');
   const id = parseInt(idStr, 10);
@@ -227,27 +229,49 @@ async function onWyrok(interaction) {
   if (sprawa.sedzia_id !== interaction.user.id) {
     return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Wyrok może wydać tylko przypisany sędzia.'), flags: EPHEMERAL_V2 });
   }
-  const modal = new ModalBuilder().setCustomId(`sad:wyrok-modal:${idStr}`).setTitle(`Wyrok — ${sprawa.numer}`);
+  if (!['przyjeta', 'w_toku'].includes(sprawa.status)) {
+    return interaction.reply({ ...karty.kartaOstrzezenie('Wyrok już wydany', 'W tej sprawie wyrok już zapadł.'), flags: EPHEMERAL_V2 });
+  }
+  await interaction.reply({ ...karty.kartaWyborWerdyktu(id), flags: EPHEMERAL_V2 });
+}
+
+// Krok 2: po wyborze kogo - modal z treścią werdyktu i karą
+async function onWyrokWobec(interaction) {
+  const [, , idStr, wobec] = interaction.customId.split(':');
+  const id = parseInt(idStr, 10);
+  const sprawa = q.poId.get(id);
+  if (!sprawa) return;
+  if (sprawa.sedzia_id !== interaction.user.id) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Wyrok może wydać tylko przypisany sędzia.'), flags: EPHEMERAL_V2 });
+  }
+  if (!karty.WYROK_WOBEC_ETYKIETY[wobec]) {
+    return interaction.reply({ ...karty.kartaBlad('Nieznana opcja', 'Wybierz jedną z opcji panelu.'), flags: EPHEMERAL_V2 });
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`sad:wyrok-modal:${idStr}:${wobec}`)
+    .setTitle(`Wyrok — ${sprawa.numer}`.slice(0, 45));
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('werdykt').setLabel('Werdykt')
+      new TextInputBuilder().setCustomId('werdykt').setLabel(`Werdykt (${karty.WYROK_WOBEC_ETYKIETY[wobec]})`.slice(0, 45))
         .setStyle(TextInputStyle.Paragraph).setMinLength(5).setMaxLength(1500).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('kara').setLabel('Kara')
-        .setPlaceholder('np. ostrzeżenie, grzywna, ban, uniewinnienie')
+        .setPlaceholder(wobec === 'uniewinniony' ? 'uniewinnienie' : wobec === 'usunieta' ? 'brak (sprawa anulowana)' : 'np. ostrzeżenie, grzywna, ban')
         .setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('list_gonczy').setLabel('Wystawić list gończy? tak/nie (opcjonalnie)')
+      new TextInputBuilder().setCustomId('list_gonczy').setLabel('Wystawić list gończy? tak/nie (opcj.)')
         .setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(false)
     ),
   );
   await interaction.showModal(modal);
 }
 
+// Krok 3: zapis werdyktu + panel decyzji o publikacji
 async function onWyrokModal(interaction) {
-  const [, , idStr] = interaction.customId.split(':');
+  const [, , idStr, wobec] = interaction.customId.split(':');
   const id = parseInt(idStr, 10);
   const sprawa = q.poId.get(id);
   if (!sprawa || sprawa.sedzia_id !== interaction.user.id || !['przyjeta', 'w_toku'].includes(sprawa.status)) {
@@ -258,27 +282,27 @@ async function onWyrokModal(interaction) {
   const kara = interaction.fields.getTextInputValue('kara').trim();
   const wystawList = (interaction.fields.getTextInputValue('list_gonczy') || '').trim().toLowerCase();
 
-  q.wydajWyrok.run(werdykt, kara, Date.now(), id);
+  q.wydajWyrok.run(werdykt, kara, wobec, Date.now(), id);
   // Rola Sędzia znika po wyroku; dostęp do kanału sprawy zostaje do jej zamknięcia
   await zdejmijRoleSedziego(interaction.guild, interaction.user.id, sprawa);
 
-  // Ostrzeżenie w historii pozwanego gracza
+  // Ostrzeżenie w historii pozwanego gracza - tylko gdy wyrok skierowany przeciwko pozwanemu (lub obojgu)
+  // Uniewinniony/usunieta/oskarzajacy nie dają warna pozwanemu
   const pozwanyId = sprawa.pozwany_typ === 'panstwo' ? null : idPozwanego(sprawa);
-  if (pozwanyId) q.wstawWarn.run(pozwanyId, `Wyrok ${sprawa.numer}: ${kara}`, interaction.user.id, Date.now(), id);
-
-  const spr = q.poId.get(id);
-  await wyslij(interaction.client, config.kanaly.wyroki, karty.kartaWyroku({ sprawa: spr }));
+  if (pozwanyId && (wobec === 'pozwany' || wobec === 'oboje')) {
+    q.wstawWarn.run(pozwanyId, `Wyrok ${sprawa.numer}: ${kara}`, interaction.user.id, Date.now(), id);
+  }
 
   await log(interaction.client, {
     tytul: 'Wyrok wydany',
-    opis: `**Sprawa:** ${spr.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Kara:** ${kara}\nWyrok jest ostateczny.`,
+    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Wobec:** ${karty.WYROK_WOBEC_ETYKIETY[wobec]}\n**Kara:** ${kara}\nWyrok jest ostateczny. Oczekuje na decyzję o publikacji.`,
     kolor: kolory.sukces,
     kanal: 'logiSad',
   });
 
-  // Automatyczny list gończy na pozwanego gracza (po jego nicku z weryfikacji)
+  // Automatyczny list gończy - tylko gdy wyrok wobec pozwanego/obojga
   let infoList = '';
-  if (['tak', 'yes', 't', 'y'].includes(wystawList) && sprawa.pozwany_typ !== 'panstwo') {
+  if (['tak', 'yes', 't', 'y'].includes(wystawList) && sprawa.pozwany_typ !== 'panstwo' && (wobec === 'pozwany' || wobec === 'oboje')) {
     const nick = sprawa.pozwany_typ === 'nick' ? sprawa.pozwany_wartosc : (pozwanyId && q.nickUsera.get(pozwanyId)?.nick);
     if (nick) {
       const { utworzList, opublikujList } = require('./listy-goncze.js');
@@ -291,7 +315,50 @@ async function onWyrokModal(interaction) {
   }
 
   await aktualizujKarteSprawy(interaction.client, id);
-  await interaction.reply({ ...karty.kartaSukces('Wyrok zapisany', `Wyrok został opublikowany i jest ostateczny.${infoList}`), flags: EPHEMERAL_V2 });
+  await interaction.reply({
+    ...karty.kartaPytanieOPublikacje(id),
+    flags: EPHEMERAL_V2,
+    // Dopisek z infoList po karcie nie jest trywialny w v2, więc puszczamy go w followUp jeśli jest
+  });
+  if (infoList) {
+    await interaction.followUp({ ...karty.kartaInfo({ tytul: 'List gończy', opis: infoList.trim(), kolor: kolory.info }), flags: EPHEMERAL_V2 });
+  }
+}
+
+// Krok końcowy: decyzja o publikacji wyroku
+async function onWyrokPublikuj(interaction) {
+  const [, , idStr, decyzja] = interaction.customId.split(':');
+  const id = parseInt(idStr, 10);
+  const sprawa = q.poId.get(id);
+  if (!sprawa || sprawa.status !== 'wyrok') {
+    return interaction.update({ ...karty.kartaBlad('Nic do publikacji', 'Werdykt nie został jeszcze zapisany albo sprawa już zamknięta.') });
+  }
+  if (sprawa.sedzia_id !== interaction.user.id) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Decyzję o publikacji podejmuje sędzia sprawy.'), flags: EPHEMERAL_V2 });
+  }
+
+  const publicznie = decyzja === 'tak';
+  q.ustawPubliczny.run(publicznie ? 1 : 0, id);
+
+  if (publicznie) {
+    const spr = q.poId.get(id);
+    await wyslij(interaction.client, config.kanaly.wyroki, karty.kartaWyroku({ sprawa: spr }));
+  }
+
+  await log(interaction.client, {
+    tytul: publicznie ? 'Wyrok opublikowany' : 'Wyrok zapisany prywatnie',
+    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Publikacja:** ${publicznie ? 'tak (kanał wyroków)' : 'nie — dostępny tylko w kanale sprawy'}`,
+    kolor: publicznie ? kolory.sukces : kolory.neutralny,
+    kanal: 'logiSad',
+  });
+
+  await aktualizujKarteSprawy(interaction.client, id);
+  await interaction.update({
+    ...karty.kartaSukces(publicznie ? 'Opublikowano' : 'Zostaje prywatny',
+      publicznie
+        ? `Wyrok trafił na kanał z wyrokami. Jest widoczny dla wszystkich.`
+        : 'Wyrok został zapisany, ale nie zostanie opublikowany publicznie. Widzą go tylko osoby mające dostęp do tego kanału sprawy.'),
+  });
 }
 
 // Stare karty spraw mogą mieć przycisk odwołania
@@ -338,7 +405,9 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('sad:dowod', onDowod);
   zarejestruj('sad:dowod-modal', onDowodModal);
   zarejestruj('sad:wyrok', onWyrok);
+  zarejestruj('sad:wyrok-wobec', onWyrokWobec);
   zarejestruj('sad:wyrok-modal', onWyrokModal);
+  zarejestruj('sad:wyrok-publikuj', onWyrokPublikuj);
   zarejestruj('sad:odwol', onOdwolanie);
   zarejestruj('sad:zamknij', onZamknijPrzycisk);
 }

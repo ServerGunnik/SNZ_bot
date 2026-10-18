@@ -39,6 +39,9 @@ dodajKolumne('panstwa_czlonkowie', 'status', "TEXT NOT NULL DEFAULT 'czlonek'");
 // Eskalacja ticketu przez /przekaz-wyzej - zapamiętana ranga blokuje przejęcie przez równych/niższych
 dodajKolumne('tickety', 'eskalowany_przez', 'TEXT');
 dodajKolumne('tickety', 'eskalowany_z_rangi', 'INTEGER');
+// Wyrok wobec kogo (oskarzajacy, pozwany, oboje, uniewinniony, usunieta) + flaga publikacji
+dodajKolumne('sprawy', 'wyrok_wobec', 'TEXT');
+dodajKolumne('sprawy', 'wyrok_publiczny', 'INTEGER DEFAULT 0');
 
 db.sciezka = dbPath;
 
