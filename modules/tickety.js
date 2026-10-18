@@ -45,6 +45,56 @@ const DOSTEP_BOTA = [
   PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageChannels,
 ];
 
+// ---- Zarządzanie "nadzorem" (kto może pisać na kanale po przejęciu) ----
+// Model: po przejęciu bot odbiera SendMessages rolom staff/helper na kanale ticketu.
+// Pisać mogą: autor (ma własny overwrite z utworzenia), przydzielony (dodawany tutaj),
+// nadzorujący dodani przez /nadzor (dodawani oddzielnie), technicy (zawsze mają allow).
+
+async function zablokujPisanieStaffu(kanal) {
+  if (!kanal?.permissionOverwrites) return;
+  for (const id of config.role.staff) {
+    await kanal.permissionOverwrites.edit(id, {
+      ViewChannel: true, ReadMessageHistory: true, SendMessages: false,
+    }).catch(() => null);
+  }
+  for (const id of config.role.helper) {
+    await kanal.permissionOverwrites.edit(id, {
+      ViewChannel: true, ReadMessageHistory: true, SendMessages: false,
+    }).catch(() => null);
+  }
+}
+
+async function przywrocPisanieStaffu(kanal) {
+  if (!kanal?.permissionOverwrites) return;
+  for (const id of config.role.staff) {
+    await kanal.permissionOverwrites.edit(id, {
+      ViewChannel: true, ReadMessageHistory: true, SendMessages: true, ManageMessages: true,
+    }).catch(() => null);
+  }
+  for (const id of config.role.helper) {
+    await kanal.permissionOverwrites.edit(id, {
+      ViewChannel: true, ReadMessageHistory: true, SendMessages: true, AttachFiles: true,
+    }).catch(() => null);
+  }
+}
+
+async function pozwolPisacUserowi(kanal, userId) {
+  if (!kanal?.permissionOverwrites || !userId) return;
+  await kanal.permissionOverwrites.edit(userId, {
+    ViewChannel: true, ReadMessageHistory: true, SendMessages: true, AttachFiles: true,
+  }).catch(() => null);
+}
+
+async function zabierzOverwriteUserowi(kanal, userId) {
+  if (!kanal?.permissionOverwrites || !userId) return;
+  await kanal.permissionOverwrites.delete(userId, 'Ticket: zabrany dostęp do pisania').catch(() => null);
+}
+
+// Technicy nie mają roli staff/helper (często), więc muszą dostać indywidualny allow na przejętym tickecie
+async function pozwolPisacTechnikom(kanal) {
+  for (const id of config.technicy) await pozwolPisacUserowi(kanal, id);
+}
+
 function odpowiedz(interaction, payload) {
   return interaction.reply({ ...payload, flags: EPHEMERAL_V2 });
 }
@@ -297,6 +347,15 @@ async function onPrzejmij(interaction) {
   q.wyczyscEskalacje.run(ticket.id);
   q.przydziel.run(interaction.user.id, ticket.id);
   await interaction.update(kartaDlaTicketu({ ...ticket, przydzielony: interaction.user.id }));
+
+  // Blokada pisania dla reszty staffu/helpera + odblokowanie dla nowego przydzielonego i techników.
+  // Jeśli ktoś zabierał (poprzedni), zabieramy mu już pozwolenie.
+  if (poprzedni && poprzedni !== interaction.user.id) {
+    await zabierzOverwriteUserowi(interaction.channel, poprzedni);
+  }
+  await zablokujPisanieStaffu(interaction.channel);
+  await pozwolPisacUserowi(interaction.channel, interaction.user.id);
+  await pozwolPisacTechnikom(interaction.channel);
   const tytulInfo = poprzedni ? 'Zgłoszenie przejęte od innego moderatora' : 'Zgłoszenie przejęte';
   const opisInfo = poprzedni
     ? `Teraz obsługuje <@${interaction.user.id}> (zabrał od <@${poprzedni}>).`
@@ -625,4 +684,8 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('ticket:ocena', onOcena);
 }
 
-module.exports = { rejestruj, obsluzUsuniecieKanalu, zarejestrujAktywnosc, uruchomZadaniaTicketow, sprawdzTickety, odswiezKarteTicketu };
+module.exports = {
+  rejestruj, obsluzUsuniecieKanalu, zarejestrujAktywnosc, uruchomZadaniaTicketow, sprawdzTickety,
+  odswiezKarteTicketu,
+  zablokujPisanieStaffu, przywrocPisanieStaffu, pozwolPisacUserowi, zabierzOverwriteUserowi, pozwolPisacTechnikom,
+};

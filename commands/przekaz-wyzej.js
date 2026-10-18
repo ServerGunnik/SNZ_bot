@@ -5,7 +5,7 @@ const { maDostepDoModeracji, rangaStaffu, pingRol } = require('../utils/uprawnie
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 const config = require('../config.js');
-const { odswiezKarteTicketu } = require('../modules/tickety.js');
+const { odswiezKarteTicketu, przywrocPisanieStaffu, zabierzOverwriteUserowi } = require('../modules/tickety.js');
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
@@ -47,6 +47,10 @@ module.exports = {
     q.eskaluj.run(interaction.user.id, Number.isFinite(mojaRanga) ? mojaRanga : Number.MAX_SAFE_INTEGER, ticket.id);
     // Odśwież kartę - przycisk „Przejmij" ma znów być aktywny, „Obsługuje" ma pokazać „nikt jeszcze"
     await odswiezKarteTicketu(interaction.client, ticket.id);
+    // Nadzór: zabierz pisanie dotychczasowemu eskalującemu, przywróć pisanie dla staffu/helpera
+    // żeby wyższa ranga mogła od razu pisać przed przejęciem
+    await zabierzOverwriteUserowi(interaction.channel, interaction.user.id);
+    await przywrocPisanieStaffu(interaction.channel);
 
     // Ping wyższej administracji - używamy staffu (ROLA_STAFF), żeby helperzy się nie bili o eskalowany ticket
     const ping = pingRol(config.role.staff);

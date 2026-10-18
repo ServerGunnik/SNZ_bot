@@ -4,7 +4,7 @@ const karty = require('../utils/karty.js');
 const { maDostepDoModeracji, rangaStaffu } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
-const { odswiezKarteTicketu } = require('../modules/tickety.js');
+const { odswiezKarteTicketu, zabierzOverwriteUserowi, pozwolPisacUserowi, pozwolPisacTechnikom, zablokujPisanieStaffu } = require('../modules/tickety.js');
 
 const EPHEMERAL_V2 = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
@@ -76,6 +76,11 @@ module.exports = {
     q.przydziel.run(docelowy.id, ticket.id);
     // Odśwież kartę z przyciskami - inaczej dalej pokazuje poprzedniego "Obsługuje"
     await odswiezKarteTicketu(interaction.client, ticket.id);
+    // Nadzór: zabierz pisanie poprzedniemu (jeśli był), daj pisanie nowemu, utrzymaj blokadę staffu
+    if (poprzedni && poprzedni !== docelowy.id) await zabierzOverwriteUserowi(interaction.channel, poprzedni);
+    await zablokujPisanieStaffu(interaction.channel);
+    await pozwolPisacUserowi(interaction.channel, docelowy.id);
+    await pozwolPisacTechnikom(interaction.channel);
 
     const tytul = poprzedni ? 'Ticket przekazany' : 'Ticket przypisany';
     const opis = poprzedni
