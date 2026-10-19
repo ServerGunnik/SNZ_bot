@@ -340,9 +340,13 @@ async function onWyrokPublikuj(interaction) {
   const publicznie = decyzja === 'tak';
   q.ustawPubliczny.run(publicznie ? 1 : 0, id);
 
+  const spr = q.poId.get(id);
   if (publicznie) {
-    const spr = q.poId.get(id);
+    // Publiczny wyrok - trafia na kanał z publicznymi wyrokami (widoczny dla wszystkich)
     await wyslij(interaction.client, config.kanaly.wyroki, karty.kartaWyroku({ sprawa: spr }));
+  } else if (config.kanaly.wyrokiPrywatne) {
+    // Prywatny wyrok - archiwum tylko dla staffu (jeśli KANAL_WYROKI_PRYWATNE ustawione)
+    await wyslij(interaction.client, config.kanaly.wyrokiPrywatne, karty.kartaWyroku({ sprawa: spr }));
   }
 
   await log(interaction.client, {

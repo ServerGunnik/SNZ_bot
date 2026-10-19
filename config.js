@@ -28,6 +28,9 @@ module.exports = {
     ticket: process.env.KANAL_TICKET,
     listyGoncze: process.env.KANAL_LISTY_GONCZE,
     wyroki: process.env.KANAL_WYROKI,
+    // Prywatne wyroki (archiwum tylko dla staffu). Jeśli puste - prywatne wyroki zostają tylko
+    // w kanale sprawy (który znika po zamknięciu, więc historii nie będzie).
+    wyrokiPrywatne: process.env.KANAL_WYROKI_PRYWATNE,
     modCall: process.env.KANAL_MOD_CALL,
     kategoriaTickety: process.env.KATEGORIA_TICKETY,
     kategoriaSprawy: process.env.KATEGORIA_SPRAWY,
