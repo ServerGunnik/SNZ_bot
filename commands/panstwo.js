@@ -29,25 +29,10 @@ function konfliktKrola(userId, panstwoId = null) {
   return { nick, panstwo: q.poId.get(czlonek.panstwo_id) };
 }
 
-async function nadajRoleLidera(guild, userId) {
-  if (!config.role.lider.length) return;
-  const czlonek = await guild.members.fetch(userId).catch(() => null);
-  if (!czlonek) return;
-  for (const id of config.role.lider) {
-    const rola = guild.roles.cache.get(id);
-    if (rola) await czlonek.roles.add(rola).catch(() => {});
-  }
-}
-
-async function zabierzRoleLidera(guild, userId) {
-  if (!userId || !config.role.lider.length) return;
-  const czlonek = await guild.members.fetch(userId).catch(() => null);
-  if (!czlonek) return;
-  for (const id of config.role.lider) {
-    const rola = guild.roles.cache.get(id);
-    if (rola) await czlonek.roles.remove(rola).catch(() => {});
-  }
-}
+// Nadawanie/odbieranie ról lidera robi się ręcznie - ROLA_LIDER w .env służy tylko do
+// sprawdzania uprawnień (jestLider), bot nie dotyka ról przy tworzeniu/zmianie/rozwiązaniu państwa.
+async function nadajRoleLidera() { /* no-op */ }
+async function zabierzRoleLidera() { /* no-op */ }
 
 module.exports = {
   data: new SlashCommandBuilder()
