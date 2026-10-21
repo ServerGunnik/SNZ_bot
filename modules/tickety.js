@@ -269,7 +269,11 @@ async function onFormularz(interaction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const kategoriaKanal = config.kanaly.kategoriaTickety || interaction.channel?.parentId;
+  // Fallback: jak KATEGORIA_TICKETY wskazuje na coś, co nie jest kategorią, próbujemy parent aktualnego kanału,
+  // a jak i to nie jest kategorią - tworzymy bez parent (Discord odrzuci parent_id dla nie-kategorii)
+  const kategoriaId = config.kanaly.kategoriaTickety || interaction.channel?.parentId;
+  const kategoriaK = kategoriaId && interaction.guild.channels.cache.get(kategoriaId);
+  const kategoriaKanal = kategoriaK?.type === ChannelType.GuildCategory ? kategoriaId : null;
   const staffRole = config.role.staff;
   const helperRole = config.role.helper;
   const nickPole = pola.find(p => kategoria.pola.find(k => k.id === p.id)?.nick);
@@ -384,10 +388,14 @@ function nazwaNarady(username, ticketId) {
 async function utworzNarade(interaction, ticket) {
   const staffRole = config.role.staff;
   const helperRole = config.role.helper;
+  // Jak KATEGORIA_NARADY nie jest kategorią - fallback na null (bez parent)
+  const kategoriaNaradyId = config.kanaly.kategoriaNarady;
+  const kategoriaNaradyK = kategoriaNaradyId && interaction.guild.channels.cache.get(kategoriaNaradyId);
+  const parentNarady = kategoriaNaradyK?.type === ChannelType.GuildCategory ? kategoriaNaradyId : null;
   const narada = await interaction.guild.channels.create({
     name: nazwaNarady(interaction.user.username, ticket.id),
     type: ChannelType.GuildText,
-    parent: config.kanaly.kategoriaNarady || null,
+    parent: parentNarady,
     topic: `Narada administracji — ticket #${ticket.id} (${ticket.kategoria}). Gracz nie widzi tego kanału.`,
     permissionOverwrites: [
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },

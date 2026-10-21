@@ -99,7 +99,14 @@ module.exports = {
 
     // Kanał prywatny
     const staff = config.role.staff;
-    const kategoria = config.kanaly.kategoriaSprawy || null;
+    // Zabezpieczenie: KATEGORIA_SPRAWY musi wskazywać na kategorię (ChannelType 4). Jak ktoś wkleił ID
+    // zwykłego kanału, Discord odrzuca tworzenie - lepiej fallback do braku parent niż crash.
+    const kategoriaRaw = config.kanaly.kategoriaSprawy;
+    const kategoriaKanal = kategoriaRaw && interaction.guild.channels.cache.get(kategoriaRaw);
+    const kategoria = kategoriaKanal?.type === ChannelType.GuildCategory ? kategoriaRaw : null;
+    if (kategoriaRaw && !kategoria) {
+      console.error(`[pozew] KATEGORIA_SPRAWY (${kategoriaRaw}) nie jest kategorią - tworzę kanał bez parent.`);
+    }
     // Nadpisanie uprawnień dla osoby spoza serwera wysypałoby tworzenie kanału
     const pozwanyNaSerwerze = pozwanyId && await interaction.guild.members.fetch(pozwanyId).catch(() => null);
     const dostepStrony = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory];

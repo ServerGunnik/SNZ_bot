@@ -196,10 +196,14 @@ async function onZglosModal(interaction) {
 
   // Kanał tylko dla administracji (i bota)
   const staff = config.role.staff;
+  // Fallback: jak KATEGORIA_NARADY nie jest kategorią (np. wklejono ID zwykłego kanału), omijamy parent
+  const kategoriaNaradyId = config.kanaly.kategoriaNarady;
+  const kategoriaNaradyK = kategoriaNaradyId && interaction.guild.channels.cache.get(kategoriaNaradyId);
+  const parentListu = kategoriaNaradyK?.type === ChannelType.GuildCategory ? kategoriaNaradyId : null;
   const kanal = await interaction.guild.channels.create({
     name: `zatrzymanie-${list.nick}-${zgloszenieId}`.toLowerCase().slice(0, 90),
     type: ChannelType.GuildText,
-    parent: config.kanaly.kategoriaNarady || null,
+    parent: parentListu,
     topic: `Zgłoszenie zatrzymania #${zgloszenieId} — list gończy #${list.id} (${list.nick}). Zgłaszający nie widzi kanału, dopóki administracja go nie doda.`,
     permissionOverwrites: [
       { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
