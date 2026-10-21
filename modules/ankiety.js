@@ -13,6 +13,7 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?)`),
   zapiszWiadomosc: db.prepare('UPDATE ankiety SET wiadomosc_id = ? WHERE id = ?'),
   poId: db.prepare('SELECT * FROM ankiety WHERE id = ?'),
+  poWiadomosci: db.prepare('SELECT * FROM ankiety WHERE wiadomosc_id = ?'),
   doZamkniecia: db.prepare('SELECT * FROM ankiety WHERE zamknieta = 0 AND konczy <= ?'),
   oznaczZamkniete: db.prepare('UPDATE ankiety SET zamknieta = 1 WHERE id = ?'),
   // Jeden wybór: wymuś pojedynczy głos usuwając poprzedni
@@ -92,9 +93,10 @@ function kartaAnkiety(ankieta, { zamknieta = false } = {}) {
   return payload;
 }
 
-async function utworzAnkiete(interaction, { pytanie, opcje, godziny, wiele }) {
+async function utworzAnkiete(interaction, { pytanie, opcje, czasMs, godziny, wiele }) {
+  // Zachowujemy wsparcie dla starego parametru 'godziny' (dla kompatybilności), ale preferujemy czasMs
   const utworzono = Date.now();
-  const konczy = utworzono + godziny * 60 * 60 * 1000;
+  const konczy = utworzono + (czasMs != null ? czasMs : (godziny || 24) * 60 * 60 * 1000);
   const info = q.utworz.run(pytanie, JSON.stringify(opcje), wiele ? 1 : 0, interaction.channel.id, interaction.user.id, utworzono, konczy);
   const ankieta = q.poId.get(info.lastInsertRowid);
 
@@ -146,7 +148,14 @@ async function zamknijAnkiete(client, ankieta) {
   if (!kanal) return;
   const wiad = await kanal.messages.fetch(ankieta.wiadomosc_id).catch(() => null);
   if (!wiad) return;
-  await wiad.edit(kartaAnkiety(ankieta, { zamknieta: true })).catch(() => null);
+  // Pobierz świeży stan z DB żeby karta pokazała ostateczne wyniki
+  const swieza = q.poId.get(ankieta.id);
+  await wiad.edit(kartaAnkiety(swieza, { zamknieta: true })).catch(() => null);
+}
+
+// Szuka anonimowej ankiety po ID wiadomości (na kanale, gdzie wywołana komenda)
+function anonimowaPoWiadomosci(wiadomoscId) {
+  return q.poWiadomosci.get(wiadomoscId);
 }
 
 async function sprawdzZamykane(client) {
@@ -165,4 +174,4 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('ankieta:glos', onGlos);
 }
 
-module.exports = { rejestruj, utworzAnkiete, uruchomCyklZamykania };
+module.exports = { rejestruj, utworzAnkiete, uruchomCyklZamykania, zamknijAnkiete, anonimowaPoWiadomosci };
