@@ -578,6 +578,11 @@ function opisPozwanego(sprawa) {
   return `Państwo **${sprawa.pozwany_wartosc}**`;
 }
 
+// „⚖️ Oskarżający: Prokurator — nick” (po /sprawa-prokuratora)
+function liniaOskarzajacego(sprawa) {
+  return sprawa.prokurator_id ? `⚖️ **Oskarżający:** Prokurator — ${sprawa.prokurator_nick || `<@${sprawa.prokurator_id}>`}\n` : '';
+}
+
 function kartaSprawy({ sprawa, dowody = [] }) {
   const kolor = {
     zlozona: kolory.info,
@@ -593,6 +598,7 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
+    liniaOskarzajacego(sprawa) +
     `**Pozwany:** ${opisPozwanego(sprawa)}\n` +
     `**Sędzia:** ${sprawa.sedzia_id ? `<@${sprawa.sedzia_id}>` : '_oczekuje na przyjęcie_'}\n` +
     `**Status:** ${sprawa.status.replace('_', ' ')}\n` +
@@ -662,6 +668,7 @@ function kartaWyroku({ sprawa }) {
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
+    liniaOskarzajacego(sprawa) +
     `**Pozwany:** ${opisPozwanego(sprawa)}\n` +
     `**Sędzia:** <@${sprawa.sedzia_id}>\n` +
     `**Data wyroku:** <t:${Math.floor(sprawa.wyrok_data / 1000)}:f>` +
@@ -698,8 +705,8 @@ function kartaPytanieOPublikacje(sprawaId) {
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     'Werdykt zapisany. **Czy wyrok ma zostać opublikowany publicznie?**\n\n' +
-    '-# „Tak" — wyrok trafia na kanał z wyrokami (widoczny dla wszystkich).\n' +
-    '-# „Nie" — wyrok zostaje tylko w tym kanale sprawy, dla osób uprawnionych.'
+    '-# „Tak” — rozprawa publiczna: wyrok trafia na kanał „wyroki sądowe” (widoczny dla wszystkich).\n' +
+    '-# „Nie” — rozprawa niepubliczna: wyrok trafia na kanał „sprawy-sąd” (tylko dla uprawnionych).'
   ));
   c.addSeparatorComponents(separator(false));
   c.addActionRowComponents(new ActionRowBuilder().addComponents(

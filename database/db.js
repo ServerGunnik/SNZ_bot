@@ -42,6 +42,10 @@ dodajKolumne('tickety', 'eskalowany_z_rangi', 'INTEGER');
 // Wyrok wobec kogo (oskarzajacy, pozwany, oboje, uniewinniony, usunieta) + flaga publikacji
 dodajKolumne('sprawy', 'wyrok_wobec', 'TEXT');
 dodajKolumne('sprawy', 'wyrok_publiczny', 'INTEGER DEFAULT 0');
+// Oskarżający z ramienia prokuratury (/sprawa-prokuratora) i znacznik decyzji o publikacji wyroku
+dodajKolumne('sprawy', 'prokurator_id', 'TEXT');
+dodajKolumne('sprawy', 'prokurator_nick', 'TEXT');
+dodajKolumne('sprawy', 'publikacja_data', 'INTEGER');
 
 db.sciezka = dbPath;
 

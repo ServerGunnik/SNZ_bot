@@ -1,10 +1,10 @@
 const {
-  MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
+  MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestStaff } = require('../utils/uprawnienia.js');
+const { jestStaff, jestProkuratorem } = require('../utils/uprawnienia.js');
 const { log, wyslij } = require('../utils/logger.js');
 const { transkrypt } = require('../utils/transkrypt.js');
 const kolory = require('../utils/kolory.js');
@@ -18,7 +18,6 @@ const q = {
   przypisz: db.prepare("UPDATE sprawy SET sedzia_id = ?, status = 'w_toku' WHERE id = ? AND status = 'zlozona' AND sedzia_id IS NULL"),
   zmienSedziego: db.prepare('UPDATE sprawy SET sedzia_id = ?, poprzedni_sedzia = ? WHERE id = ?'),
   wydajWyrok: db.prepare("UPDATE sprawy SET werdykt = ?, kara = ?, wyrok_wobec = ?, status = 'wyrok', wyrok_data = ? WHERE id = ?"),
-  ustawPubliczny: db.prepare('UPDATE sprawy SET wyrok_publiczny = ? WHERE id = ?'),
   zamknij: db.prepare("UPDATE sprawy SET status = 'zamknieta', zamknieta = ? WHERE id = ?"),
   wstawDowod: db.prepare('INSERT INTO sprawy_dowody (sprawa_id, user_id, tresc, data) VALUES (?, ?, ?, ?)'),
   dowody: db.prepare('SELECT * FROM sprawy_dowody WHERE sprawa_id = ? ORDER BY id'),
@@ -29,7 +28,42 @@ const q = {
   czlonekPoNicku: db.prepare('SELECT * FROM panstwa_czlonkowie WHERE nick = ? COLLATE NOCASE'),
   wstawWarn: db.prepare('INSERT INTO ostrzezenia (user_id, powod, wystawca_id, data, sprawa_id) VALUES (?, ?, ?, ?, ?)'),
   weryfikacjaPoNicku: db.prepare('SELECT * FROM weryfikacja WHERE nick = ? COLLATE NOCASE'),
+  ostatniPozew: db.prepare('SELECT utworzona FROM sprawy WHERE pozywajacy_id = ? AND utworzona >= ? ORDER BY utworzona DESC LIMIT 1'),
+  resetCooldownu: db.prepare('SELECT data FROM pozew_cooldown_reset WHERE user_id = ?'),
+  zapiszReset: db.prepare('INSERT INTO pozew_cooldown_reset (user_id, data, przez) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, przez = excluded.przez'),
+  ustawProkuratora: db.prepare("UPDATE sprawy SET prokurator_id = ?, prokurator_nick = ? WHERE id = ? AND prokurator_id IS NULL AND status IN ('zlozona','przyjeta','w_toku')"),
+  // Decyzja o publikacji zapada raz - drugi klik nie wyśle wyroku ponownie
+  ustawPubliczny: db.prepare('UPDATE sprawy SET wyrok_publiczny = ?, publikacja_data = ? WHERE id = ? AND publikacja_data IS NULL'),
 };
+
+// ---- Cooldown pozwów ---------------------------------------------------
+// Ogólny cooldown (12 h) albo osobny dla prokuratora (10 min). Liczy się ostatni pozew złożony
+// po ewentualnym ręcznym zdjęciu cooldownu (/sprawa-cooldown).
+function stanCooldownu(member, userId = member?.id) {
+  const prokurator = jestProkuratorem(member);
+  const cooldownMs = prokurator ? config.pozew.cooldownProkuratoraMs : config.pozew.cooldownMs;
+  const od = Math.max(Date.now() - cooldownMs, q.resetCooldownu.get(userId)?.data ?? 0);
+  const ostatni = q.ostatniPozew.get(userId, od);
+  return {
+    prokurator,
+    cooldownMs,
+    kolejnyMozliwy: ostatni ? ostatni.utworzona + cooldownMs : null,
+  };
+}
+
+function zdejmijCooldown(userId, przezId) {
+  q.zapiszReset.run(userId, Date.now(), przezId);
+}
+
+// Kategoria „Rozprawy sądowe”: ID z .env, a jeśli to nie jest kategoria - domyślne z configu
+async function kategoriaSpraw(guild) {
+  for (const id of [config.kanaly.kategoriaSprawy, config.kanaly.kategoriaSprawyDomyslna].filter(Boolean)) {
+    const kanal = guild.channels.cache.get(id) || await guild.channels.fetch(id).catch(() => null);
+    if (kanal?.type === ChannelType.GuildCategory) return kanal.id;
+    console.error(`[sad] ${id} nie jest kategorią na tym serwerze - pomijam.`);
+  }
+  return null;
+}
 
 // ---- Strony sprawy i konflikt interesów --------------------------------
 
@@ -71,6 +105,7 @@ function czyStronaSprawy(sprawa, userId) {
 // Powód, dla którego użytkownik nie może sądzić w tej sprawie (null = może)
 function konfliktInteresow(sprawa, userId) {
   if (czyStronaSprawy(sprawa, userId)) return 'jesteś stroną tej sprawy (pozywającym albo pozwanym)';
+  if (sprawa.prokurator_id && userId === sprawa.prokurator_id) return 'jesteś oskarżającym prokuratorem w tej sprawie';
   const wspolne = [...panstwaUzytkownika(userId)].filter(id => panstwaSprawy(sprawa).has(id));
   if (wspolne.length) {
     const nazwa = q.panstwoPoId.get(wspolne[0])?.nazwa || '???';
@@ -338,30 +373,30 @@ async function onWyrokPublikuj(interaction) {
   }
 
   const publicznie = decyzja === 'tak';
-  q.ustawPubliczny.run(publicznie ? 1 : 0, id);
-
-  const spr = q.poId.get(id);
-  if (publicznie) {
-    // Publiczny wyrok - trafia na kanał z publicznymi wyrokami (widoczny dla wszystkich)
-    await wyslij(interaction.client, config.kanaly.wyroki, karty.kartaWyroku({ sprawa: spr }));
-  } else if (config.kanaly.wyrokiPrywatne) {
-    // Prywatny wyrok - archiwum tylko dla staffu (jeśli KANAL_WYROKI_PRYWATNE ustawione)
-    await wyslij(interaction.client, config.kanaly.wyrokiPrywatne, karty.kartaWyroku({ sprawa: spr }));
+  if (q.ustawPubliczny.run(publicznie ? 1 : 0, Date.now(), id).changes === 0) {
+    return interaction.update({ ...karty.kartaOstrzezenie('Decyzja już zapadła', 'O publikacji tego wyroku już zdecydowano — nie zostanie wysłany drugi raz.') });
   }
 
+  // Rozprawa publiczna -> kanał „wyroki sądowe”, niepubliczna -> kanał „sprawy-sąd”
+  const spr = q.poId.get(id);
+  const kanalDocelowy = publicznie ? config.kanaly.wyroki : config.kanaly.wyrokiPrywatne;
+  const wyslana = kanalDocelowy ? await wyslij(interaction.client, kanalDocelowy, karty.kartaWyroku({ sprawa: spr })) : null;
+
   await log(interaction.client, {
-    tytul: publicznie ? 'Wyrok opublikowany' : 'Wyrok zapisany prywatnie',
-    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Publikacja:** ${publicznie ? 'tak (kanał wyroków)' : 'nie — dostępny tylko w kanale sprawy'}`,
+    tytul: publicznie ? 'Wyrok opublikowany (rozprawa publiczna)' : 'Wyrok zapisany (rozprawa niepubliczna)',
+    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n` +
+      `**Kanał:** ${kanalDocelowy ? `<#${kanalDocelowy}>` : '_nie ustawiono_'}${kanalDocelowy && !wyslana ? ' — **nie udało się wysłać** (brak dostępu bota?)' : ''}`,
     kolor: publicznie ? kolory.sukces : kolory.neutralny,
     kanal: 'logiSad',
   });
 
   await aktualizujKarteSprawy(interaction.client, id);
   await interaction.update({
-    ...karty.kartaSukces(publicznie ? 'Opublikowano' : 'Zostaje prywatny',
-      publicznie
-        ? `Wyrok trafił na kanał z wyrokami. Jest widoczny dla wszystkich.`
-        : 'Wyrok został zapisany, ale nie zostanie opublikowany publicznie. Widzą go tylko osoby mające dostęp do tego kanału sprawy.'),
+    ...karty.kartaSukces(publicznie ? 'Opublikowano' : 'Zapisano jako niepubliczny',
+      (publicznie
+        ? 'Wyrok trafił na kanał z wyrokami sądowymi — widoczny dla wszystkich.'
+        : 'Wyrok trafił na kanał spraw niepublicznych — widoczny tylko dla uprawnionych.') +
+      (kanalDocelowy && !wyslana ? `\n\n**Uwaga:** nie udało się wysłać na <#${kanalDocelowy}> — sprawdź uprawnienia bota.` : '')),
   });
 }
 
@@ -416,4 +451,37 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('sad:zamknij', onZamknijPrzycisk);
 }
 
-module.exports = { rejestruj, zamknijSprawe, zmienSedziego, konfliktInteresow, idPozwanego, panstwaUzytkownika };
+// Prokurator przypisuje się jako oskarżający (/sprawa-prokuratora). Zwraca { blad } albo { sprawa }.
+async function przypiszProkuratora(guild, sprawa, member) {
+  if (!['zlozona', 'przyjeta', 'w_toku'].includes(sprawa.status)) return { blad: 'W tej sprawie zapadł już wyrok albo jest zamknięta.' };
+  if (sprawa.prokurator_id === member.id) return { blad: 'Jesteś już oskarżającym w tej sprawie.' };
+  if (sprawa.prokurator_id) return { blad: `Oskarżającym w tej sprawie jest już <@${sprawa.prokurator_id}>.` };
+  if (member.id === idPozwanego(sprawa)) return { blad: 'Nie możesz oskarżać we własnej sprawie jako pozwany.' };
+  if (member.id === sprawa.sedzia_id) return { blad: 'Jesteś sędzią tej sprawy — nie możesz być jednocześnie oskarżającym.' };
+
+  // Nick z weryfikacji (Minecraft), a gdy go brak - nazwa na serwerze
+  const nick = q.nickUsera.get(member.id)?.nick || member.displayName || member.user?.username;
+  if (q.ustawProkuratora.run(member.id, nick, sprawa.id).changes === 0) return { blad: 'Ktoś właśnie przypisał się do tej sprawy albo jej stan się zmienił.' };
+
+  const kanal = sprawa.kanal_id && await guild.client.channels.fetch(sprawa.kanal_id).catch(() => null);
+  if (kanal) {
+    await kanal.permissionOverwrites.edit(member.id, { ViewChannel: true, SendMessages: true, AttachFiles: true, ReadMessageHistory: true }).catch(() => {});
+    await kanal.send({
+      ...karty.kartaInfo({ tytul: 'Oskarżający przypisany', opis: `⚖️ **Oskarżający:** Prokurator — ${nick} (<@${member.id}>)`, kolor: kolory.info }),
+      allowedMentions: { parse: [] },
+    }).catch(() => null);
+  }
+  await aktualizujKarteSprawy(guild.client, sprawa.id);
+  await log(guild.client, {
+    tytul: 'Prokurator przypisany do sprawy',
+    opis: `**Sprawa:** ${sprawa.numer}\n**Oskarżający:** Prokurator — ${nick} (<@${member.id}>)`,
+    kolor: kolory.info,
+    kanal: 'logiSad',
+  });
+  return { sprawa: q.poId.get(sprawa.id), nick };
+}
+
+module.exports = {
+  rejestruj, zamknijSprawe, zmienSedziego, konfliktInteresow, idPozwanego, panstwaUzytkownika,
+  stanCooldownu, zdejmijCooldown, kategoriaSpraw, przypiszProkuratora,
+};

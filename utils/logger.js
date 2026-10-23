@@ -2,14 +2,16 @@ const config = require('../config.js');
 const karty = require('./karty.js');
 const kolory = require('./kolory.js');
 
+// Zwraca wysłaną wiadomość albo null (brak kanału / brak dostępu)
 async function wyslij(client, kanalId, payload) {
-  if (!kanalId) return;
+  if (!kanalId) return null;
   try {
     const kanal = await client.channels.fetch(kanalId).catch(() => null);
-    if (!kanal) return;
-    await kanal.send(payload);
+    if (!kanal) return null;
+    return await kanal.send(payload);
   } catch (e) {
     console.error('[logger] błąd wysyłki logu:', e.message);
+    return null;
   }
 }
 
