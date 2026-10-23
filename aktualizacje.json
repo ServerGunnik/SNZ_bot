@@ -1,0 +1,33 @@
+[
+  {
+    "id": "2026-10-23-sad",
+    "data": "2026-10-23",
+    "tytul": "Sąd: Prokurator, cooldowny i kanały wyroków",
+    "dodano": [
+      "Ranga Prokurator i komenda `/sprawa-prokuratora` — prokurator przypisuje się jako oskarżający; na karcie sprawy pojawia się „⚖️ Oskarżający: Prokurator — nick”.",
+      "Komenda `/sprawa-cooldown` — Admin/Sędzia, Założyciel i Technik mogą zdjąć komuś cooldown na tworzenie rozpraw.",
+      "Cooldown na tworzenie rozpraw: 12 h, dla Prokuratora 10 min.",
+      "Wyroki z rozpraw publicznych trafiają na kanał „wyroki sądowe”, a z niepublicznych na „sprawy-sąd”."
+    ],
+    "naprawiono": [
+      "Nowe sprawy sądowe trafiają do kategorii „Rozprawy sądowe”.",
+      "Wyrok nie może zostać opublikowany dwa razy."
+    ],
+    "opis": "Po złożeniu pozwu Prokurator może dołączyć do sprawy jako oskarżający. Sędzia po wyroku decyduje, czy rozprawa była publiczna — od tego zależy, na którym kanale pojawi się wyrok."
+  },
+  {
+    "id": "2026-10-23-recru-update-log",
+    "data": "2026-10-23",
+    "tytul": "Rekrutacja i kanał update-log",
+    "dodano": [
+      "Kanał update-log — bot sam publikuje tutaj informacje o nowych funkcjach i poprawkach.",
+      "`/recru usun` usuwa też kategorię „Rekrutacja”, jeśli utworzył ją bot."
+    ],
+    "naprawiono": [
+      "`/recru stworz` znowu tworzy kanały: „Poczekalnia rekrutacyjna” i „Rekrutacja”.",
+      "Kandydat, który wyszedł z poczekalni, nie zostaje już wyciszony na całym serwerze.",
+      "Komenda `/recru` jest widoczna dla całego staffu, nie tylko dla osób z uprawnieniem „Zarządzanie kanałami”."
+    ],
+    "opis": "W poczekalni kandydat nie może mówić. Po przeniesieniu na kanał „Rekrutacja” może normalnie rozmawiać, a po wyjściu traci do niego dostęp. `/recru usun` kończy rekrutację i usuwa jej kanały."
+  }
+]

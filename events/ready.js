@@ -19,6 +19,8 @@ module.exports = {
     require('../modules/tickety.js').uruchomZadaniaTicketow(client);
     require('../modules/kopie.js').uruchomKopie();
     require('../modules/ochrona-logow.js').uruchomOchrone(client);
+    require('../modules/update-log.js').opublikujNowe(client)
+      .catch((e) => console.error('[ready] update-log', e));
     require('../modules/ochrona-kanalow.js').uruchomOchrone(client);
     require('../modules/ankiety.js').uruchomCyklZamykania(client);
     require('../modules/blokady.js').uruchomBlokady();

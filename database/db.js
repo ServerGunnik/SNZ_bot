@@ -46,6 +46,8 @@ dodajKolumne('sprawy', 'wyrok_publiczny', 'INTEGER DEFAULT 0');
 dodajKolumne('sprawy', 'prokurator_id', 'TEXT');
 dodajKolumne('sprawy', 'prokurator_nick', 'TEXT');
 dodajKolumne('sprawy', 'publikacja_data', 'INTEGER');
+// Czy kategorię „Rekrutacja” utworzył bot (wtedy /recru usun usuwa ją razem z kanałami)
+dodajKolumne('rekrutacja', 'kategoria_utworzona', 'INTEGER DEFAULT 0');
 
 db.sciezka = dbPath;
 

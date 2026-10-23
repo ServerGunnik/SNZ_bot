@@ -716,6 +716,29 @@ function kartaPytanieOPublikacje(sprawaId) {
   return { components: [c], ...FLAGS_V2 };
 }
 
+// ---- Update-log --------------------------------------------------------
+
+// Wpis z aktualizacje.json: { tytul, data, dodano[], naprawiono[], opis }
+function kartaAktualizacji({ wpis, wersja = null }) {
+  const lista = (pozycje) => pozycje.map(p => `• ${p}`).join('\n');
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst(`## 📋 Aktualizacja bota — ${wpis.tytul}\n-# ${wpis.data}`));
+  if (wpis.dodano?.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`### 🆕 Dodano / zmieniono\n${lista(wpis.dodano)}`));
+  }
+  if (wpis.naprawiono?.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`### 🔧 Naprawiono\n${lista(wpis.naprawiono)}`));
+  }
+  if (wpis.opis) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(`### 📝 Opis\n${wpis.opis}`));
+  }
+  if (wersja) c.addTextDisplayComponents(tekst(`-# Wersja kodu: ${wersja}`));
+  return { components: [c], ...FLAGS_V2 };
+}
+
 // ---- Powitania ---------------------------------------------------------
 
 function kartaPowitania({ userId, liczbaCzlonkow, kanalWeryfikacji = null, kanalTicketow = null }) {
@@ -805,6 +828,7 @@ function kartaOstrzezen({ user_id, warny, avatar, waznoscDni = 0, progi = null }
 }
 
 module.exports = {
+  kartaAktualizacji,
   FLAGS_V2,
   tekst, separator, kontener, przycisk, link,
   kartaInfo, kartaSukces, kartaBlad, kartaOstrzezenie,

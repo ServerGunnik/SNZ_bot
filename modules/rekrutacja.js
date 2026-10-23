@@ -1,5 +1,9 @@
-// System rekrutacji: dwa kanały głosowe tworzone komendą /recru stworz, kandydaci wyciszani
-// server-mutem przy dołączeniu do poczekalni, odciszani po przeniesieniu do pokoju rekrutacyjnego.
+// System rekrutacji: /recru stworz tworzy dwa kanały głosowe, /recru usun je usuwa.
+// - „Poczekalnia rekrutacyjna”: każdy może wejść, ale nie może mówić (brak uprawnienia Mów na kanale).
+// - „Rekrutacja”: widoczna tylko dla staffu; kandydat przeniesiony tutaj dostaje na czas rozmowy
+//   własne uprawnienia do kanału i może normalnie rozmawiać.
+// Wyciszenie wynika z uprawnień kanału, a nie z server-mute, więc kandydat, który wyjdzie
+// z poczekalni w dowolny sposób, nigdy nie zostaje wyciszony na reszcie serwera.
 const { PermissionFlagsBits, ChannelType } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
@@ -7,162 +11,160 @@ const { wszechwladny, maRole } = require('../utils/uprawnienia.js');
 
 const q = {
   aktywna: db.prepare('SELECT * FROM rekrutacja WHERE aktywna = 1 ORDER BY id DESC LIMIT 1'),
-  wstaw: db.prepare('INSERT INTO rekrutacja (kategoria_id, poczekalnia_id, pokoj_id, utworzyl, utworzono) VALUES (?, ?, ?, ?, ?)'),
+  wstaw: db.prepare('INSERT INTO rekrutacja (kategoria_id, kategoria_utworzona, poczekalnia_id, pokoj_id, utworzyl, utworzono) VALUES (?, ?, ?, ?, ?, ?)'),
   zamknij: db.prepare('UPDATE rekrutacja SET aktywna = 0 WHERE id = ?'),
 };
 
-function rolaStaffowe() {
-  return [...new Set([
-    ...config.role.staff, ...config.role.helper,
-    ...config.role.lider, ...config.role.sedzia,
-  ])];
-}
+const NAZWA_KATEGORII = 'Rekrutacja';
+const NAZWA_POCZEKALNI = '📣 Poczekalnia rekrutacyjna';
+const NAZWA_POKOJU = '🎯 Rekrutacja';
+
+const P = PermissionFlagsBits;
+// Kandydat w pokoju rekrutacyjnym (nadawane na czas rozmowy)
+const DOSTEP_KANDYDATA = { ViewChannel: true, Connect: true, Speak: true, UseVAD: true };
 
 function aktywnaRekrutacja() {
   return q.aktywna.get() || null;
 }
 
-// Minimalne uprawnienia staffu na kanałach rekrutacyjnych (unikamy niepotrzebnych grantów)
-const UPRAWNIENIA_STAFFU_VOICE = [
-  PermissionFlagsBits.ViewChannel,
-  PermissionFlagsBits.Connect,
-  PermissionFlagsBits.Speak,
-  PermissionFlagsBits.UseVAD,
-  PermissionFlagsBits.MuteMembers,
-  PermissionFlagsBits.DeafenMembers,
-  PermissionFlagsBits.MoveMembers,
-];
-const UPRAWNIENIA_BOTA = [
-  ...UPRAWNIENIA_STAFFU_VOICE,
-  PermissionFlagsBits.ManageChannels,
-];
+// Role prowadzące rekrutację, które faktycznie istnieją na serwerze (błędne ID z .env wysypałyby tworzenie kanału)
+function roleRekrutujacych(guild) {
+  return [...new Set([...config.role.staff, ...config.role.helper])].filter(id => guild.roles.cache.has(id));
+}
+
+// Discord odrzuca kanał, w którym bot ustawia uprawnienie, którego sam nie ma - zostawiamy tylko te, które ma
+function tylkoPosiadane(guild, lista) {
+  const me = guild.members.me;
+  if (!me) return lista;
+  return lista.filter(p => me.permissions.has(p));
+}
+
+function nadpisania(guild, { everyone, bot, rekrutujacy }) {
+  const role = roleRekrutujacych(guild);
+  return [
+    { id: guild.id, allow: tylkoPosiadane(guild, everyone.allow), deny: tylkoPosiadane(guild, everyone.deny) },
+    { id: guild.client.user.id, allow: tylkoPosiadane(guild, bot) },
+    ...role.map(id => ({ id, allow: tylkoPosiadane(guild, rekrutujacy) })),
+  ];
+}
 
 async function stworz(guild, autorId) {
   const istniejaca = q.aktywna.get();
   if (istniejaca) {
-    const poczekalnia = guild.channels.cache.get(istniejaca.poczekalnia_id);
-    const pokoj = guild.channels.cache.get(istniejaca.pokoj_id);
-    if (poczekalnia || pokoj) {
+    if (guild.channels.cache.has(istniejaca.poczekalnia_id) || guild.channels.cache.has(istniejaca.pokoj_id)) {
       return { blad: 'już trwa', istniejaca };
     }
-    q.zamknij.run(istniejaca.id);
+    q.zamknij.run(istniejaca.id); // kanały usunięte ręcznie - zaczynamy od nowa
   }
 
-  // Kategoria "Rekrutacja" - szukamy istniejącej, jeśli nie ma to tworzymy
-  let kategoria = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === 'rekrutacja');
+  const me = guild.members.me;
+  if (me && !me.permissions.has(P.ManageChannels)) {
+    return { blad: 'Bot nie ma uprawnienia „Zarządzanie kanałami”.' };
+  }
+
+  // Kategoria „Rekrutacja”: istniejąca albo nowa (nową usuniemy przy /recru usun)
+  let kategoria = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === NAZWA_KATEGORII.toLowerCase());
+  let kategoriaUtworzona = false;
   if (!kategoria) {
     try {
-      kategoria = await guild.channels.create({
-        name: 'Rekrutacja',
-        type: ChannelType.GuildCategory,
-        reason: 'Rekrutacja: tworzę kategorię',
-      });
+      kategoria = await guild.channels.create({ name: NAZWA_KATEGORII, type: ChannelType.GuildCategory, reason: 'Rekrutacja: kategoria' });
+      kategoriaUtworzona = true;
     } catch (e) {
-      return { blad: `kategoria: ${e.message}` };
+      return { blad: `Nie udało się utworzyć kategorii: ${e.message}` };
     }
   }
 
-  const staffyIds = rolaStaffowe();
+  const rekrutujacy = [P.ViewChannel, P.Connect, P.Speak, P.UseVAD, P.MoveMembers];
+  const bot = [P.ViewChannel, P.Connect, P.Speak, P.MoveMembers, P.ManageChannels];
 
-  // Poczekalnia: wszyscy mogą dołączyć, ale bez mikrofonu (deny Speak). Dodatkowo server-mute przy join.
   let poczekalnia;
+  let pokoj;
   try {
     poczekalnia = await guild.channels.create({
-      name: '📣 Poczekalnia rekrutacji',
+      name: NAZWA_POCZEKALNI,
       type: ChannelType.GuildVoice,
       parent: kategoria.id,
       reason: 'Rekrutacja: poczekalnia',
-      permissionOverwrites: [
-        {
-          id: guild.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-          deny: [PermissionFlagsBits.Speak, PermissionFlagsBits.UseVAD, PermissionFlagsBits.Stream],
-        },
-        { id: guild.client.user.id, allow: UPRAWNIENIA_BOTA },
-        ...staffyIds.map(id => ({ id, allow: UPRAWNIENIA_STAFFU_VOICE })),
-      ],
+      // Każdy wchodzi, nikt poza rekrutującymi nie mówi
+      permissionOverwrites: nadpisania(guild, {
+        everyone: { allow: [P.ViewChannel, P.Connect], deny: [P.Speak, P.Stream] },
+        bot,
+        rekrutujacy,
+      }),
     });
-  } catch (e) {
-    return { blad: `poczekalnia: ${e.message}` };
-  }
-
-  // Pokój rekrutacyjny: niewidoczny dla @everyone, dostępny tylko dla staffu. Staff ręcznie przenosi kandydata.
-  // Po przeniesieniu bot auto-unmute (patrz obsluzZmianeStanuGlosowego).
-  let pokoj;
-  try {
     pokoj = await guild.channels.create({
-      name: '🎯 Pokój rekrutacyjny',
+      name: NAZWA_POKOJU,
       type: ChannelType.GuildVoice,
       parent: kategoria.id,
-      reason: 'Rekrutacja: pokój do rozmowy',
-      permissionOverwrites: [
-        {
-          id: guild.id,
-          deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect],
-        },
-        { id: guild.client.user.id, allow: UPRAWNIENIA_BOTA },
-        ...staffyIds.map(id => ({ id, allow: UPRAWNIENIA_STAFFU_VOICE })),
-      ],
+      reason: 'Rekrutacja: pokój rozmowy',
+      // Ukryty dla wszystkich; kandydat dostaje dostęp po przeniesieniu
+      permissionOverwrites: nadpisania(guild, {
+        everyone: { allow: [], deny: [P.ViewChannel, P.Connect] },
+        bot,
+        rekrutujacy,
+      }),
     });
   } catch (e) {
-    await poczekalnia.delete('Rollback - nieudane tworzenie pokoju').catch(() => null);
-    return { blad: `pokój: ${e.message}` };
+    // Sprzątanie po nieudanej próbie - żadnych osieroconych kanałów
+    if (poczekalnia) await poczekalnia.delete('Rekrutacja: wycofanie nieudanego tworzenia').catch(() => null);
+    if (kategoriaUtworzona) await kategoria.delete('Rekrutacja: wycofanie nieudanego tworzenia').catch(() => null);
+    return { blad: `Nie udało się utworzyć kanałów: ${e.message}` };
   }
 
-  q.wstaw.run(kategoria.id, poczekalnia.id, pokoj.id, autorId, Date.now());
-
-  return { kategoria, poczekalnia, pokoj };
+  q.wstaw.run(kategoria.id, kategoriaUtworzona ? 1 : 0, poczekalnia.id, pokoj.id, autorId, Date.now());
+  return { kategoria, poczekalnia, pokoj, brakMoveMembers: me ? !me.permissions.has(P.MoveMembers) : false };
 }
 
 async function usun(guild, autorTag) {
   const istniejaca = q.aktywna.get();
   if (!istniejaca) return { nic: true };
 
+  const powod = `Rekrutacja zakończona przez ${autorTag}`;
   const usuniete = [];
-  for (const [nazwa, id] of [['poczekalnia', istniejaca.poczekalnia_id], ['pokój', istniejaca.pokoj_id]]) {
-    const kanal = guild.channels.cache.get(id);
-    if (!kanal) continue;
-    const ok = await kanal.delete(`Rekrutacja zakończona przez ${autorTag}`).then(() => true).catch(() => false);
-    if (ok) usuniete.push(nazwa);
+  const nieUsuniete = [];
+  for (const [nazwa, id] of [['poczekalnia', istniejaca.poczekalnia_id], ['pokój rekrutacji', istniejaca.pokoj_id]]) {
+    const kanal = guild.channels.cache.get(id) || await guild.channels.fetch(id).catch(() => null);
+    if (!kanal) continue; // już nie istnieje
+    const ok = await kanal.delete(powod).then(() => true).catch(() => false);
+    (ok ? usuniete : nieUsuniete).push(nazwa);
   }
 
-  const kategoria = istniejaca.kategoria_id && guild.channels.cache.get(istniejaca.kategoria_id);
-  if (kategoria && kategoria.children?.cache.size === 0) {
-    await kategoria.delete(`Rekrutacja zakończona przez ${autorTag}`).catch(() => null);
-    usuniete.push('kategoria');
+  // Kategorię usuwamy tylko, jeśli to bot ją utworzył i nie ma w niej innych kanałów
+  const kategoria = istniejaca.kategoria_id && (guild.channels.cache.get(istniejaca.kategoria_id) || await guild.channels.fetch(istniejaca.kategoria_id).catch(() => null));
+  if (kategoria && istniejaca.kategoria_utworzona) {
+    const pozostale = guild.channels.cache.filter(c => c.parentId === kategoria.id).size;
+    if (pozostale === 0) {
+      const ok = await kategoria.delete(powod).then(() => true).catch(() => false);
+      (ok ? usuniete : nieUsuniete).push('kategoria');
+    }
   }
 
-  q.zamknij.run(istniejaca.id);
-  return { usuniete };
+  // Rekord zamykamy tylko, gdy nic nie zostało - inaczej /recru usun można powtórzyć
+  if (!nieUsuniete.length) q.zamknij.run(istniejaca.id);
+  return { usuniete, nieUsuniete };
 }
 
-// Czy użytkownik jest zwolniony z auto-mute? (staff, właściciel, technik)
-function zwolnionyZMute(member) {
-  if (!member) return true;
-  if (wszechwladny(member)) return true;
-  const staffyIds = rolaStaffowe();
-  if (staffyIds.length && maRole(member, staffyIds)) return true;
-  return false;
+// Rekrutujący (staff, helper, właściciel, technik) nie potrzebują osobnego dostępu
+function rekrutujacy(member) {
+  return wszechwladny(member) || maRole(member, [...config.role.staff, ...config.role.helper]);
 }
 
-// Hook do voiceStateUpdate: auto-mute w poczekalni, unmute po wyjściu
+// voiceStateUpdate: kandydat przeniesiony do pokoju dostaje dostęp, po wyjściu go traci
 async function obsluzZmianeStanuGlosowego(oldState, newState) {
   const rek = aktywnaRekrutacja();
   if (!rek) return;
   const member = newState.member || oldState.member;
-  if (!member || member.user.bot) return;
-  if (zwolnionyZMute(member)) return;
+  if (!member || member.user.bot || rekrutujacy(member)) return;
 
-  const wszedlDoPoczekalni = newState.channelId === rek.poczekalnia_id && oldState.channelId !== rek.poczekalnia_id;
-  const wyszedlZPoczekalni = oldState.channelId === rek.poczekalnia_id && newState.channelId !== rek.poczekalnia_id;
+  const wszedlDoPokoju = newState.channelId === rek.pokoj_id && oldState.channelId !== rek.pokoj_id;
+  const wyszedlZPokoju = oldState.channelId === rek.pokoj_id && newState.channelId !== rek.pokoj_id;
 
-  if (wszedlDoPoczekalni && !member.voice.serverMute) {
-    await member.voice.setMute(true, 'Rekrutacja: poczekalnia').catch(() => null);
-    return;
-  }
-  // Przeniesienie z poczekalni do pokoju rekrutacyjnego (albo gdziekolwiek dalej) - zdejmujemy mute
-  if (wyszedlZPoczekalni && member.voice.serverMute) {
-    await member.voice.setMute(false, 'Rekrutacja: opuścił poczekalnię').catch(() => null);
+  if (wszedlDoPokoju) {
+    await newState.channel?.permissionOverwrites.edit(member.id, DOSTEP_KANDYDATA, { reason: 'Rekrutacja: kandydat na rozmowie' }).catch(() => null);
+    // Kandydaci wyciszeni server-mutem przez poprzednią wersję poczekalni
+    if (member.voice?.serverMute) await member.voice.setMute(false, 'Rekrutacja: rozmowa').catch(() => null);
+  } else if (wyszedlZPokoju) {
+    await oldState.channel?.permissionOverwrites.delete(member.id, 'Rekrutacja: koniec rozmowy').catch(() => null);
   }
 }
 

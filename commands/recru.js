@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const karty = require('../utils/karty.js');
 const { jestStaff } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
@@ -16,7 +16,7 @@ async function stworzKanaly(interaction) {
   }
   if (wynik.blad) {
     return interaction.editReply(karty.kartaBlad('Nie udało się utworzyć',
-      `${wynik.blad}\n\n**Sprawdź:** bot musi mieć uprawnienie "Zarządzanie kanałami" na serwerze, a jego rola musi być **wyżej** niż role staff/helper (żeby mógł na nich ustawić overwrite'y).`));
+      `${wynik.blad}\n\n**Sprawdź:** bot musi mieć na serwerze uprawnienia „Zarządzanie kanałami” i „Zarządzanie rolami”.`));
   }
 
   await log(interaction.client, {
@@ -26,9 +26,10 @@ async function stworzKanaly(interaction) {
   });
 
   return interaction.editReply(karty.kartaSukces('Rekrutacja uruchomiona',
-    `**Poczekalnia:** <#${wynik.poczekalnia.id}> — kandydaci dołączają tutaj. Bot ich automatycznie wycisza przy wejściu (mikrofon zablokowany).\n` +
-    `**Pokój rekrutacyjny:** <#${wynik.pokoj.id}> — widoczny tylko dla staffu. Przenieś kandydata z poczekalni (prawy klik → Przenieś) — bot auto-odciszy go po opuszczeniu poczekalni.\n\n` +
-    'Po skończeniu rekrutacji: `/recru usun` — bot skasuje oba kanały.'));
+    `**Poczekalnia:** <#${wynik.poczekalnia.id}> — kandydaci dołączają tutaj i nie mogą mówić.\n` +
+    `**Rekrutacja:** <#${wynik.pokoj.id}> — widoczna tylko dla staffu. Przenieś kandydata z poczekalni (prawy klik → Przenieś do) — tutaj może normalnie rozmawiać.\n\n` +
+    'Po skończeniu rekrutacji: `/recru usun` — bot usunie kanały rekrutacji.' +
+    (wynik.brakMoveMembers ? '\n-# Bot nie ma uprawnienia „Przenieś członków” — przenosić kandydatów musi staff z tym uprawnieniem.' : '')));
 }
 
 async function usunKanaly(interaction) {
@@ -38,24 +39,31 @@ async function usunKanaly(interaction) {
     return interaction.editReply(karty.kartaOstrzezenie('Brak aktywnej rekrutacji', 'Nic do usunięcia. Użyj `/recru stworz` żeby zacząć.'));
   }
 
+  const usuniete = wynik.usuniete.length ? wynik.usuniete.join(', ') : '_nic — kanały już nie istniały_';
   await log(interaction.client, {
     tytul: 'Rekrutacja — usunięto kanały',
-    opis: `**Usunięto:** ${wynik.usuniete.length ? wynik.usuniete.join(', ') : '_nic (kanały już nie istniały)_'}\n**Zakończył:** <@${interaction.user.id}>`,
+    opis: `**Usunięto:** ${usuniete}` +
+      (wynik.nieUsuniete.length ? `\n**Nie udało się usunąć:** ${wynik.nieUsuniete.join(', ')}` : '') +
+      `\n**Zakończył:** <@${interaction.user.id}>`,
     kolor: kolory.neutralny,
   });
 
-  return interaction.editReply(karty.kartaSukces('Rekrutacja zakończona',
-    `Usunięto: ${wynik.usuniete.length ? wynik.usuniete.join(', ') : '_nic — kanały już nie istniały_'}`));
+  if (wynik.nieUsuniete.length) {
+    return interaction.editReply(karty.kartaOstrzezenie('Nie wszystko usunięto',
+      `Usunięto: ${usuniete}\nNie udało się usunąć: **${wynik.nieUsuniete.join(', ')}** — sprawdź uprawnienia bota i użyj \`/recru usun\` ponownie.`));
+  }
+  return interaction.editReply(karty.kartaSukces('Rekrutacja zakończona', `Usunięto: ${usuniete}`));
 }
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('recru')
-    .setDescription('System rekrutacji: poczekalnia + pokój do rozmów')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .setDescription('System rekrutacji: poczekalnia + kanał rozmów (staff)')
+    // Bez domyślnego wymogu „Zarządzanie kanałami” - inaczej staff bez tego uprawnienia nie widział komendy.
+    // Dostęp sprawdza jestStaff poniżej.
     .setDMPermission(false)
-    .addSubcommand(s => s.setName('stworz').setDescription('Utwórz poczekalnię i pokój rekrutacyjny'))
-    .addSubcommand(s => s.setName('usun').setDescription('Usuń kanały rekrutacyjne (zakończ sesję)')),
+    .addSubcommand(s => s.setName('stworz').setDescription('Utwórz poczekalnię rekrutacyjną i kanał Rekrutacja'))
+    .addSubcommand(s => s.setName('usun').setDescription('Usuń wszystkie kanały utworzone przez rekrutację')),
 
   async execute(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

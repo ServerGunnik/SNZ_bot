@@ -13,7 +13,7 @@ process.env.TECHNIK_ID = 'TECHNIK';
 
 const fs = require('fs');
 const path = require('path');
-const { Collection, ModalBuilder, ChannelType, AuditLogEvent } = require('discord.js');
+const { Collection, ModalBuilder, ChannelType, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 
 const KORZEN = path.join(__dirname, '..');
 const wymagaj = (p) => require(path.join(KORZEN, p));
@@ -137,7 +137,7 @@ const karty = wymagaj('utils/karty.js');
   db.prepare("INSERT INTO listy_goncze (id, nick, powod, wystawca_id, status, utworzony) VALUES (1, 'Zly', 'Kradzież', 'GRACZ', 'aktywny', 0)").run();
   db.prepare("INSERT INTO sprawy (id, numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, utworzona, sedzia_id, status) VALUES (1, 'SNZ-2026-0001', 'A', 'nick', 'Steve', 'z', 'o', 0, 'STAFFER', 'w_toku')").run();
 
-  const kanaly = new Map();
+  const kanaly = new Collection();
   const nowyKanal = (id, name = id) => {
     const k = {
       id, name, parentId: null, wyslane: [], members: new Collection(),
@@ -162,7 +162,7 @@ const karty = wymagaj('utils/karty.js');
     id: 'G', ownerId: 'WLASCICIEL', memberCount: 10, client,
     channels: {
       cache: kanaly,
-      create: async (o) => Object.assign(nowyKanal(`K${++licznikKanalow}`, o.name), { parentId: o.parent ?? null }),
+      create: async (o) => Object.assign(nowyKanal(`K${++licznikKanalow}`, o.name), { parentId: o.parent ?? null, type: o.type, opcje: o }),
       fetch: async (id) => kanaly.get(id) || null,
     },
     roles: { cache: new Collection() },
@@ -643,6 +643,82 @@ const karty = wymagaj('utils/karty.js');
   const token3 = potwierdzenia[2].match(/list:nagroda-potw:([a-z0-9]+)/)[1];
   await znajdz(`list:nagroda-potw:${token3}`)(atrapa(`list:nagroda-potw:${token3}`, graczA, { user: { id: 'GRACZ_A' } }));
   sprawdz(liczNagrody() === przedDolozeniem + 1, 'potwierdzenie dokłada nagrodę');
+
+  // ---------------------------------------------------------------------
+  sekcja('Rekrutacja: /recru stworz i /recru usun');
+  const rekrutacja = wymagaj('modules/rekrutacja.js');
+  const P = PermissionFlagsBits;
+  guild.roles.cache.set('STAFF', { id: 'STAFF' });
+  config.role.helper.push('ROLA_KTOREJ_NIE_MA');
+  // Bot bez „Przenieś członków” i „Wycisz członków” - takich uprawnień nie może nadać na kanale
+  const meRekrutacji = { permissions: { has: (p) => p !== P.MoveMembers && p !== P.MuteMembers } };
+  const poprzedniMe = guild.members.me;
+  guild.members.me = meRekrutacji;
+  const odpRecru = [];
+  const recru = (member, sub) => wymagaj('commands/recru.js').execute({
+    guild, client, member, user: { id: 'STAFFER', tag: 'staffer#0' },
+    options: { getSubcommand: () => sub },
+    deferReply: async () => {}, editReply: async (p) => odpRecru.push(JSON.stringify(p.components[0].toJSON())),
+  });
+  await recru(gracz, 'stworz');
+  sprawdz(odpRecru.at(-1).includes('Brak uprawnień') && !rekrutacja.aktywnaRekrutacja(), 'gracz nie uruchomi rekrutacji');
+  const kanalyPrzed = kanaly.size;
+  await recru(staff, 'stworz');
+  const rek = rekrutacja.aktywnaRekrutacja();
+  const poczekalnia = rek && kanaly.get(rek.poczekalnia_id);
+  const pokojRek = rek && kanaly.get(rek.pokoj_id);
+  sprawdz(rek && kanaly.size === kanalyPrzed + 3 && odpRecru.at(-1).includes('Rekrutacja uruchomiona'), '/recru stworz tworzy kategorię i dwa kanały głosowe');
+  sprawdz(poczekalnia?.type === ChannelType.GuildVoice && pokojRek?.type === ChannelType.GuildVoice && poczekalnia.parentId === rek.kategoria_id, 'oba kanały są głosowe i w kategorii Rekrutacja');
+  const nadpisanie = (kanal, id) => kanal.opcje.permissionOverwrites.find(o => o.id === id);
+  sprawdz(nadpisanie(poczekalnia, guild.id).deny.includes(P.Speak) && nadpisanie(poczekalnia, guild.id).allow.includes(P.Connect), 'w poczekalni można wejść, ale nie można mówić');
+  sprawdz(nadpisanie(pokojRek, guild.id).deny.includes(P.ViewChannel) && nadpisanie(pokojRek, 'STAFF').allow.includes(P.Speak), 'kanał Rekrutacja ukryty dla wszystkich, dostępny dla staffu');
+  const wszystkieNadpisania = [...poczekalnia.opcje.permissionOverwrites, ...pokojRek.opcje.permissionOverwrites];
+  sprawdz(!wszystkieNadpisania.some(o => [...(o.allow || []), ...(o.deny || [])].some(p => p === P.MoveMembers || p === P.MuteMembers)), 'bot nie ustawia uprawnień, których sam nie ma (inaczej Discord odrzuca kanał)');
+  sprawdz(!wszystkieNadpisania.some(o => o.id === 'ROLA_KTOREJ_NIE_MA'), 'nieistniejące role z .env są pomijane');
+  await recru(staff, 'stworz');
+  sprawdz(odpRecru.at(-1).includes('Rekrutacja już trwa') && kanaly.size === kanalyPrzed + 3, 'druga /recru stworz nie dubluje kanałów');
+
+  const zmianyDostepu = [];
+  pokojRek.permissionOverwrites = { edit: async (id, o) => zmianyDostepu.push(`dostep:${id}:${o.Speak}`), delete: async (id) => zmianyDostepu.push(`zabrano:${id}`) };
+  const kandydat = { id: 'KANDYDAT', guild, user: { bot: false }, roles: { cache: new Map() }, voice: { serverMute: false } };
+  const stan = (kanal, member) => ({ channelId: kanal?.id ?? null, channel: kanal ?? null, member });
+  await wymagaj('events/voiceStateUpdate.js').execute(stan(poczekalnia, kandydat), stan(pokojRek, kandydat), client);
+  sprawdz(zmianyDostepu.includes('dostep:KANDYDAT:true'), 'kandydat przeniesiony na Rekrutację może mówić');
+  await wymagaj('events/voiceStateUpdate.js').execute(stan(pokojRek, kandydat), stan(null, kandydat), client);
+  sprawdz(zmianyDostepu.includes('zabrano:KANDYDAT'), 'po wyjściu kandydat traci dostęp do kanału Rekrutacja');
+  const rekrutujacyStaff = { ...staff, id: 'STAFFER', guild, user: { bot: false }, voice: {} };
+  const przedStaffem = zmianyDostepu.length;
+  await wymagaj('events/voiceStateUpdate.js').execute(stan(poczekalnia, rekrutujacyStaff), stan(pokojRek, rekrutujacyStaff), client);
+  sprawdz(zmianyDostepu.length === przedStaffem, 'staff nie dostaje osobnych uprawnień (ma je z roli)');
+
+  await recru(staff, 'usun');
+  sprawdz(!kanaly.has(rek.poczekalnia_id) && !kanaly.has(rek.pokoj_id) && !kanaly.has(rek.kategoria_id), '/recru usun usuwa oba kanały i utworzoną kategorię');
+  sprawdz(!rekrutacja.aktywnaRekrutacja() && odpRecru.at(-1).includes('Rekrutacja zakończona'), 'po /recru usun rekrutacja jest zakończona');
+  await recru(staff, 'usun');
+  sprawdz(odpRecru.at(-1).includes('Brak aktywnej rekrutacji'), 'ponowne /recru usun informuje, że nie ma czego usuwać');
+  config.role.helper.pop();
+  guild.members.me = poprzedniMe;
+
+  // ---------------------------------------------------------------------
+  sekcja('Update-log: wpisy z aktualizacje.json');
+  const updateLog = wymagaj('modules/update-log.js');
+  const wpisy = updateLog.wczytajAktualizacje();
+  sprawdz(Array.isArray(wpisy) && wpisy.length > 0, 'aktualizacje.json to niepusta lista');
+  sprawdz(new Set(wpisy.map(w => w.id)).size === wpisy.length, 'id wpisów w aktualizacje.json są unikalne');
+  for (const w of wpisy) {
+    const ok = typeof w.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(w.data) && w.tytul && typeof w.opis === 'string' && w.opis.length > 0 &&
+      (w.dodano?.length || w.naprawiono?.length) && [...(w.dodano || []), ...(w.naprawiono || [])].every(x => typeof x === 'string' && x.length);
+    sprawdz(ok, `wpis ${w.id}: wymagane id, data RRRR-MM-DD, tytul, opis oraz dodano lub naprawiono`);
+    const json = JSON.stringify(karty.kartaAktualizacji({ wpis: w, wersja: 'abc' }).components[0].toJSON());
+    sprawdz(json.length < 3800, `wpis ${w.id}: karta mieści się w limicie Discorda`);
+  }
+  const przedUpdate = wyslaneWyslij.length;
+  await updateLog.opublikujNowe(client);
+  const wyslaneUpdate = wyslaneWyslij.slice(przedUpdate);
+  sprawdz(wyslaneUpdate.length === wpisy.length && wyslaneUpdate.every(p => p.kanal === '1536121456037990491'), 'wszystkie nowe wpisy trafiają na kanał update-log');
+  sprawdz(JSON.stringify(wyslaneUpdate[0].components[0].toJSON()).includes('🆕') && JSON.stringify(wyslaneUpdate[0].components[0].toJSON()).includes('📝'), 'wpis zawiera sekcje 🆕 i 📝');
+  await updateLog.opublikujNowe(client);
+  sprawdz(wyslaneWyslij.length === przedUpdate + wpisy.length, 'po restarcie wpisy nie są wysyłane ponownie');
 
   // ---------------------------------------------------------------------
   sekcja('Ochrona logów: usunięty log wraca, sprawca traci rangi');

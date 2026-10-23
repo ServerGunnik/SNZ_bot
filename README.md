@@ -45,6 +45,7 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 ### Staff
 - `/panel-weryfikacji` — wystawia panel weryfikacji w bieżącym kanale.
 - `/panel-ticket` — wystawia panel ticketów.
+- `/recru stworz` — tworzy kanały głosowe „Poczekalnia rekrutacyjna” (kandydat nie może mówić) i „Rekrutacja” (widoczna dla staffu; przeniesiony kandydat może rozmawiać). `/recru usun` usuwa kanały rekrutacji (i kategorię „Rekrutacja”, jeśli utworzył ją bot).
 - `/selfrole grupa-utworz|grupa-usun|grupa-lista|rola-dodaj|rola-usun|wystaw` — pełne zarządzanie selfrole.
 - `/panstwo utworz|zmien-lidera|limit|sojusznik|rozwiaz|lista` — państwa i liderzy (rola nadawana/odbierana automatycznie), `sojusznik` ustawia pole `allay` w configu moda.
 - `/list-gonczy-admin zatwierdz|odrzuc|zamknij` — zatwierdzanie i zamykanie listów.
@@ -97,6 +98,7 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 - **Powitania**: nowy członek dostaje powitanie z instrukcją weryfikacji na kanale `KANAL_POWITANIA` (puste = wyłączone).
 - **Antynuke**: na podstawie dziennika zdarzeń wykrywa masowe banowanie, wyrzucanie, usuwanie i spamowanie kanałów oraz usuwanie ról (progi w `config.js` → `antynuke`). Sprawca spoza whitelisty traci role / jest wyrzucany / banowany (`ANTYNUKE_KARA`), a szkody są cofane: odbanowanie ofiar, odtworzenie usuniętych kanałów i ról, usunięcie spamowanych kanałów. Opcjonalnie (`ANTYNUKE_WYRZUCAJ_BOTY=true`) boty dodane przez osoby spoza whitelisty są wyrzucane. Nadanie komuś roli z uprawnieniami administracyjnymi albo dopisanie takich uprawnień do roli przez osobę spoza whitelisty jest od razu cofane. Liczone są też masowe webhooki, zmiany uprawnień kanałów i ustawień serwera.
 - **Blokada uprawnień botów**: każdy nowo dodany bot (kogokolwiek) od razu traci wszystkie uprawnienia swojej roli; właściciel dostaje DM, a log trafia na kanał antynuke. Zmienić to może tylko właściciel serwera — ręcznie w ustawieniach roli bota albo `/bot-uprawnienia przywroc` (nadaje uprawnienia, o które bot prosił przy dodaniu). Gdy ktokolwiek inny (także osoba z whitelisty antynuke) da botowi uprawnienia roli, nową rolę albo uprawnienia na kanale, zmiana jest cofana. Po restarcie bot nadrabia zmiany z czasu, gdy był wyłączony. Boty, które były na serwerze przed włączeniem blokady, można objąć nią komendą `/bot-uprawnienia zablokuj`. Rola SNZ_bot musi być wyżej niż role dodawanych botów. Wyłączenie: `BLOKADA_BOTOW_WYLACZONA=true`.
+- **Update-log**: przy starcie bot publikuje na kanale `KANAL_UPDATE_LOG` (domyślnie `1536121456037990491`) nowe wpisy z `aktualizacje.json` — 🆕 co dodano/zmieniono, 🔧 co naprawiono, 📝 opis. Każdy wpis wysyła się raz.
 - **Anty-raid**: masowe wbijanie (domyślnie 8 dołączeń w 15 s) włącza tryb ochrony na 10 min — młode konta z fali i każdy kolejny nowy członek są wyrzucani (z DM). Ręcznie: `/antynuke raid`.
 
 ## Struktura projektu
@@ -138,5 +140,6 @@ Nowy moduł:
 2. Rejestruj handlery na prefiksy `customId`.
 3. Dodaj komendy w `commands/`, uruchom `npm run deploy`.
 4. Buildery kart trzymaj w `utils/karty.js`.
-5. Uruchom `npm test` przed wysłaniem zmian.
+5. Dopisz wpis na końcu `aktualizacje.json` (`id`, `data`, `tytul`, `dodano`, `naprawiono`, `opis`) — po wdrożeniu i restarcie bot opublikuje go na kanale update-log.
+6. Uruchom `npm test` przed wysłaniem zmian (sprawdza też poprawność `aktualizacje.json`).
 # SNZ_bot

@@ -315,3 +315,10 @@ CREATE TABLE IF NOT EXISTS pozew_cooldown_reset (
   data INTEGER NOT NULL,
   przez TEXT NOT NULL
 );
+
+-- Wpisy z aktualizacje.json już opublikowane na kanale update-log
+CREATE TABLE IF NOT EXISTS update_log (
+  id TEXT PRIMARY KEY,
+  wiadomosc_id TEXT,
+  data INTEGER NOT NULL
+);
