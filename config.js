@@ -27,13 +27,15 @@ module.exports = {
     weryfikacja: process.env.KANAL_WERYFIKACJA,
     ticket: process.env.KANAL_TICKET,
     listyGoncze: process.env.KANAL_LISTY_GONCZE,
-    wyroki: process.env.KANAL_WYROKI,
-    // Prywatne wyroki (archiwum tylko dla staffu). Jeśli puste - prywatne wyroki zostają tylko
-    // w kanale sprawy (który znika po zamknięciu, więc historii nie będzie).
-    wyrokiPrywatne: process.env.KANAL_WYROKI_PRYWATNE,
+    // Wyroki z rozpraw publicznych („wyroki sądowe”)
+    wyroki: process.env.KANAL_WYROKI || '1561390273504878632',
+    // Wyroki z rozpraw niepublicznych („sprawy-sąd”, tylko dla uprawnionych)
+    wyrokiPrywatne: process.env.KANAL_WYROKI_PRYWATNE || '1561416148019585165',
     modCall: process.env.KANAL_MOD_CALL,
     kategoriaTickety: process.env.KATEGORIA_TICKETY,
+    // Kategoria „Rozprawy sądowe” - jeśli ID z .env nie jest kategorią, bot używa domyślnej
     kategoriaSprawy: process.env.KATEGORIA_SPRAWY,
+    kategoriaSprawyDomyslna: '1556035429440954468',
     poczekalnia: process.env.POCZEKALNIA_ID,
     pomoc: [process.env.POMOC_1_ID, process.env.POMOC_2_ID, process.env.POMOC_3_ID].filter(Boolean),
   },
@@ -45,6 +47,10 @@ module.exports = {
     staff: listaId(process.env.ROLA_STAFF),
     lider: listaId(process.env.ROLA_LIDER),
     sedzia: listaId(process.env.ROLA_SEDZIA),
+    // Prokurator: krótszy cooldown na pozwy i /sprawa-prokuratora (oskarżający w sprawie)
+    prokurator: listaId(process.env.ROLA_PROKURATOR || '1563278279941554179'),
+    // Rangi Admin/Sędzia, które mogą zdjąć komuś cooldown pozwu (/sprawa-cooldown); plus właściciel i technik
+    adminSadu: listaId(process.env.ROLA_ADMIN_SADU || process.env.ROLA_SEDZIA),
     modPing: listaId(process.env.ROLA_MOD_PING || process.env.ROLA_STAFF),
     // Mogą zamykać ticket niezależnie od tego, czy go przyjęli (poza nimi może tylko osoba, która przejęła)
     zamykaczTicketu: listaId(process.env.ROLA_ZAMYKACZ_TICKETU),
@@ -64,8 +70,10 @@ module.exports = {
   },
 
   pozew: {
-    // Każdy może złożyć 1 pozew na dobę niezależnie od rangi
-    cooldownMs: 24 * 60 * 60 * 1000,
+    // Ogólny cooldown na tworzenie rozpraw (każdy, niezależnie od rangi)
+    cooldownMs: 12 * 60 * 60 * 1000,
+    // Osobny cooldown dla rangi Prokurator
+    cooldownProkuratoraMs: 10 * 60 * 1000,
   },
 
   tickety: {

@@ -44,7 +44,7 @@ const logiOpisy = [];
 const logger = wymagaj('utils/logger.js');
 logger.log = async (_c, o) => { logi.push(o.tytul); logiOpisy.push(o.opis); };
 const wyslaneWyslij = [];
-logger.wyslij = async (_c, _kanal, p) => { wyslaneWyslij.push(p); };
+logger.wyslij = async (_c, kanal, p) => { wyslaneWyslij.push({ ...p, kanal }); return { id: 'WYSLANA' }; };
 
 const db = wymagaj('database/db.js');
 const config = wymagaj('config.js');
@@ -162,11 +162,14 @@ const karty = wymagaj('utils/karty.js');
     id: 'G', ownerId: 'WLASCICIEL', memberCount: 10, client,
     channels: {
       cache: kanaly,
-      create: async (o) => nowyKanal(`K${++licznikKanalow}`, o.name),
+      create: async (o) => Object.assign(nowyKanal(`K${++licznikKanalow}`, o.name), { parentId: o.parent ?? null }),
+      fetch: async (id) => kanaly.get(id) || null,
     },
     roles: { cache: new Collection() },
     members: { fetch: async () => null, me: null },
   };
+  // Kategoria „Rozprawy sądowe” (domyślne ID z configu)
+  kanaly.set('1556035429440954468', { id: '1556035429440954468', type: ChannelType.GuildCategory, name: 'Rozprawy sądowe' });
   const staff = { roles: { cache: new Map([['STAFF', 1]]) }, permissions: { has: () => true } };
   const gracz = { roles: { cache: new Map() }, permissions: { has: () => false } };
   const modale = [];
@@ -443,6 +446,101 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id === 'SEDZIA_OK', 'sędzia się nie zmienia');
   const kartaSprawy = JSON.stringify(karty.kartaSprawy({ sprawa: { ...db.prepare('SELECT * FROM sprawy WHERE id = 2').get(), status: 'wyrok', werdykt: 'w', kara: 'k' } }).components[0].toJSON());
   sprawdz(!kartaSprawy.includes('sad:odwol'), 'po wyroku nie ma przycisku odwołania');
+
+  sekcja('Sąd: kategoria, cooldowny, prokurator, publikacja wyroków');
+  const ROLA_PROKURATORA = '1563278279941554179';
+  const czlonekSadu = (id, role = []) => ({ id, guild, displayName: `Nick_${id}`, user: { id, username: id }, roles: { cache: new Map(role.map(r => [r, 1])) }, permissions: { has: () => false } });
+  const liczPozwy = (id) => db.prepare('SELECT COUNT(*) c FROM sprawy WHERE pozywajacy_id = ?').get(id).c;
+  const odpowiedziPozwu = [];
+  const zlozPozew = (member) => wymagaj('commands/pozew.js').execute({
+    guild, client, user: { id: member.id }, member,
+    options: {
+      getString: (n) => ({ 'typ-pozwanego': 'gracz', zarzut: 'kradzież', opis: 'ukradł diamenty' }[n] ?? null),
+      getUser: () => ({ id: 'OSKARZONY', bot: false }),
+    },
+    deferReply: async () => {}, editReply: async (p) => odpowiedziPozwu.push(JSON.stringify(p.components[0].toJSON())),
+    reply: async (p) => odpowiedziPozwu.push(JSON.stringify(p.components[0].toJSON())),
+  });
+  const cofnijCzas = (id, ms) => db.prepare('UPDATE sprawy SET utworzona = utworzona - ? WHERE pozywajacy_id = ?').run(ms, id);
+
+  const graczSadu = czlonekSadu('POWOD_A');
+  await zlozPozew(graczSadu);
+  const sprawaA = db.prepare("SELECT * FROM sprawy WHERE pozywajacy_id = 'POWOD_A'").get();
+  sprawdz(sprawaA && kanaly.get(sprawaA.kanal_id)?.parentId === '1556035429440954468', 'kanał rozprawy trafia do kategorii „Rozprawy sądowe”');
+  await zlozPozew(graczSadu);
+  sprawdz(liczPozwy('POWOD_A') === 1 && odpowiedziPozwu.at(-1).includes('Cooldown'), 'drugi pozew w ciągu 12 h jest blokowany');
+  cofnijCzas('POWOD_A', 11 * 60 * 60 * 1000);
+  await zlozPozew(graczSadu);
+  sprawdz(liczPozwy('POWOD_A') === 1, 'zwykły gracz po 11 h nadal ma cooldown');
+  cofnijCzas('POWOD_A', 61 * 60 * 1000);
+  await zlozPozew(graczSadu);
+  sprawdz(liczPozwy('POWOD_A') === 2, 'po 12 h można złożyć kolejny pozew');
+
+  const prokurator = czlonekSadu('PROKURATOR', [ROLA_PROKURATORA]);
+  await zlozPozew(prokurator);
+  await zlozPozew(prokurator);
+  sprawdz(liczPozwy('PROKURATOR') === 1, 'prokurator ma cooldown (drugi pozew od razu zablokowany)');
+  cofnijCzas('PROKURATOR', 11 * 60 * 1000);
+  await zlozPozew(prokurator);
+  sprawdz(liczPozwy('PROKURATOR') === 2, 'prokurator może złożyć kolejny pozew po 10 min');
+
+  const odpCooldown = [];
+  const zdejmij = (member, cel) => wymagaj('commands/sprawa-cooldown.js').execute({
+    guild, client, user: { id: member.id }, member,
+    options: { getUser: () => ({ id: cel.id }) },
+    reply: async (p) => odpCooldown.push(JSON.stringify(p.components[0].toJSON())),
+  });
+  guild.members.fetch = async (id) => (id === 'POWOD_A' ? graczSadu : null);
+  await zdejmij(czlonekSadu('GRACZ_X'), graczSadu);
+  sprawdz(odpCooldown.at(-1).includes('Brak uprawnień'), 'zwykły gracz nie zdejmie cooldownu');
+  await zdejmij(czlonekSadu('PROK2', [ROLA_PROKURATORA]), graczSadu);
+  sprawdz(odpCooldown.at(-1).includes('Brak uprawnień'), 'prokurator nie zdejmie cooldownu');
+  await zdejmij(czlonekSadu('WLASCICIEL'), graczSadu);
+  sprawdz(odpCooldown.at(-1).includes('Cooldown zdjęty'), 'założyciel zdejmuje cooldown');
+  await zdejmij(czlonekSadu('TECHNIK'), graczSadu);
+  sprawdz(odpCooldown.at(-1).includes('Cooldown zdjęty'), 'technik zdejmuje cooldown');
+  await zlozPozew(graczSadu);
+  sprawdz(liczPozwy('POWOD_A') === 3, 'po zdjęciu cooldownu można od razu złożyć pozew');
+  await zlozPozew(graczSadu);
+  sprawdz(liczPozwy('POWOD_A') === 3, 'cooldown wraca po kolejnym pozwie');
+
+  const odpProk = [];
+  const przypisz = (member, extra = {}) => wymagaj('commands/sprawa-prokuratora.js').execute({
+    guild, client, user: { id: member.id }, member, channelId: sprawaA.kanal_id,
+    options: { getString: () => null },
+    deferReply: async () => {},
+    reply: async (p) => odpProk.push(JSON.stringify(p.components[0].toJSON())),
+    editReply: async (p) => odpProk.push(JSON.stringify(p.components[0].toJSON())),
+    ...extra,
+  });
+  await przypisz(czlonekSadu('GRACZ_Y'));
+  sprawdz(odpProk.at(-1).includes('Brak uprawnień') && !db.prepare('SELECT prokurator_id FROM sprawy WHERE id = ?').get(sprawaA.id).prokurator_id, 'bez rangi Prokurator nie można zostać oskarżającym');
+  db.prepare("INSERT INTO weryfikacja (user_id, nick, data) VALUES ('PROKURATOR', 'ProkuratorMC', 0)").run();
+  await przypisz(prokurator);
+  const poPrzypisaniu = db.prepare('SELECT * FROM sprawy WHERE id = ?').get(sprawaA.id);
+  sprawdz(poPrzypisaniu.prokurator_id === 'PROKURATOR' && poPrzypisaniu.prokurator_nick === 'ProkuratorMC', 'prokurator przypisany (nick z weryfikacji)');
+  const kartaZProkuratorem = JSON.stringify(karty.kartaSprawy({ sprawa: poPrzypisaniu }).components[0].toJSON());
+  sprawdz(kartaZProkuratorem.includes('⚖️ **Oskarżający:** Prokurator — ProkuratorMC'), 'karta sprawy ma wpis „Oskarżający: Prokurator — nick”');
+  await przypisz(czlonekSadu('PROK2', [ROLA_PROKURATORA]));
+  sprawdz(db.prepare('SELECT prokurator_id FROM sprawy WHERE id = ?').get(sprawaA.id).prokurator_id === 'PROKURATOR', 'drugi prokurator nie nadpisze oskarżającego');
+  sprawdz(sad.konfliktInteresow(poPrzypisaniu, 'PROKURATOR'), 'prokurator-oskarżający nie może sądzić tej sprawy');
+  await przypisz(czlonekSadu('PROK3', [ROLA_PROKURATORA]), { channelId: 'ZWYKLY_KANAL' });
+  sprawdz(odpProk.at(-1).includes('Brak sprawy'), '/sprawa-prokuratora poza kanałem sprawy wymaga numeru');
+
+  const publikuj = async (id, decyzja) => {
+    const przed = wyslaneWyslij.length;
+    await znajdz(`sad:wyrok-publikuj:${id}:${decyzja}`)(atrapa(`sad:wyrok-publikuj:${id}:${decyzja}`, staff, { user: { id: 'SEDZIA_OK' } }));
+    return wyslaneWyslij.slice(przed).filter(p => p.kanal && JSON.stringify(p.components || []).includes('Wyrok w sprawie'));
+  };
+  db.prepare("UPDATE sprawy SET status = 'wyrok', sedzia_id = 'SEDZIA_OK', werdykt = 'winny', kara = 'ban', wyrok_data = 1 WHERE id = ?").run(sprawaA.id);
+  const wyslanePubliczne = await publikuj(sprawaA.id, 'tak');
+  sprawdz(wyslanePubliczne.length === 1 && wyslanePubliczne[0].kanal === '1561390273504878632', 'rozprawa publiczna → kanał „wyroki sądowe”');
+  sprawdz((await publikuj(sprawaA.id, 'nie')).length === 0, 'decyzja o publikacji zapada raz (brak drugiej wysyłki)');
+  const sprawaB = db.prepare("SELECT * FROM sprawy WHERE pozywajacy_id = 'PROKURATOR'").get();
+  db.prepare("UPDATE sprawy SET status = 'wyrok', sedzia_id = 'SEDZIA_OK', werdykt = 'w', kara = 'k', wyrok_data = 1 WHERE id = ?").run(sprawaB.id);
+  const wyslanePrywatne = await publikuj(sprawaB.id, 'nie');
+  sprawdz(wyslanePrywatne.length === 1 && wyslanePrywatne[0].kanal === '1561416148019585165', 'rozprawa niepubliczna → kanał „sprawy-sąd”');
+  db.prepare("DELETE FROM sprawy WHERE pozywajacy_id IN ('POWOD_A', 'PROKURATOR')").run();
 
   // ---------------------------------------------------------------------
   sekcja('List gończy: zgłoszenie zatrzymania z dowodem');

@@ -6,6 +6,7 @@ const config = require('../config.js');
 const karty = require('../utils/karty.js');
 const { log, wyslij } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
+const { stanCooldownu, kategoriaSpraw } = require('../modules/sad.js');
 
 const q = {
   utworz: db.prepare(`INSERT INTO sprawy
@@ -13,8 +14,6 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   zapiszKanal: db.prepare('UPDATE sprawy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
   ostatnia: db.prepare("SELECT numer FROM sprawy ORDER BY id DESC LIMIT 1"),
-  // Najświeższa sprawa w oknie cooldownu dla danego pozywającego - do rate-limitu
-  ostatniaUzytkownika: db.prepare('SELECT utworzona FROM sprawy WHERE pozywajacy_id = ? AND utworzona >= ? ORDER BY utworzona DESC LIMIT 1'),
   panstwaPoNazwie: db.prepare('SELECT * FROM panstwa WHERE nazwa = ? COLLATE NOCASE'),
   wszystkiePanstwa: db.prepare('SELECT nazwa FROM panstwa ORDER BY nazwa COLLATE NOCASE'),
   panstwoLidera: db.prepare('SELECT * FROM panstwa WHERE lider_id = ?'),
@@ -22,6 +21,21 @@ const q = {
 
 function blad(interaction, tytul, opis) {
   return interaction.reply({ ...karty.kartaBlad(tytul, opis), flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
+}
+
+function opisCzasu(ms) {
+  const min = Math.round(ms / 60000);
+  return min < 60 ? `${min} min` : `${Math.round(min / 60)} h`;
+}
+
+// Karta odmowy z powodu cooldownu (null = można składać)
+function kartaCooldownu(member, userId) {
+  const { prokurator, cooldownMs, kolejnyMozliwy } = stanCooldownu(member, userId);
+  if (!kolejnyMozliwy) return null;
+  const t = Math.floor(kolejnyMozliwy / 1000);
+  return karty.kartaBlad('Cooldown na rozprawy',
+    `${prokurator ? 'Jako Prokurator możesz' : 'Możesz'} utworzyć jedną rozprawę na ${opisCzasu(cooldownMs)}. ` +
+    `Kolejną możesz utworzyć <t:${t}:R> (<t:${t}:t>).`);
 }
 
 function nastepnyNumer() {
@@ -38,7 +52,7 @@ function nastepnyNumer() {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('pozew')
-    .setDescription('Złóż pozew do Sądu Sojuszniczego (jeden na dobę)')
+    .setDescription('Złóż pozew do Sądu Sojuszniczego (cooldown 12 h, Prokurator 10 min)')
     .setDMPermission(false)
     .addStringOption(o => o.setName('typ-pozwanego').setDescription('Kogo pozywasz').setRequired(true)
       .addChoices({ name: 'gracza (konto Discord)', value: 'gracz' }, { name: 'państwo', value: 'panstwo' }))
@@ -57,17 +71,9 @@ module.exports = {
   },
 
   async execute(interaction) {
-    // Każdy może złożyć pozew niezależnie od rangi, ale tylko jeden na dobę
-    const cooldownMs = config.pozew.cooldownMs;
-    const ostatnia = q.ostatniaUzytkownika.get(interaction.user.id, Date.now() - cooldownMs);
-    if (ostatnia) {
-      const kolejny = Math.floor((ostatnia.utworzona + cooldownMs) / 1000);
-      return interaction.reply({
-        ...karty.kartaBlad('Masz już pozew w tej dobie',
-          `Możesz złożyć jeden pozew na ${Math.round(cooldownMs / (60 * 60 * 1000))} h. Kolejny możesz złożyć <t:${kolejny}:R> (<t:${kolejny}:t>).`),
-        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-      });
-    }
+    // Każdy może złożyć pozew niezależnie od rangi: cooldown 12 h, Prokurator 10 min
+    const odmowa = kartaCooldownu(interaction.member, interaction.user.id);
+    if (odmowa) return interaction.reply({ ...odmowa, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
     const typ = interaction.options.getString('typ-pozwanego');
     let pozwany;
     let pozwanyId;
@@ -93,24 +99,21 @@ module.exports = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+    // Ponowne sprawdzenie tuż przed zapisem (bez await pomiędzy) - dwa szybkie /pozew nie przejdą oba
+    const odmowaPoCzekaniu = kartaCooldownu(interaction.member, interaction.user.id);
+    if (odmowaPoCzekaniu) return interaction.editReply(odmowaPoCzekaniu);
     const numer = nastepnyNumer();
     const info = q.utworz.run(numer, interaction.user.id, typ, pozwany, zarzut, opis, dowody, Date.now());
     const sprawaId = info.lastInsertRowid;
 
     // Kanał prywatny
     const staff = config.role.staff;
-    // Zabezpieczenie: KATEGORIA_SPRAWY musi wskazywać na kategorię (ChannelType 4). Jak ktoś wkleił ID
-    // zwykłego kanału, Discord odrzuca tworzenie - lepiej fallback do braku parent niż crash.
-    const kategoriaRaw = config.kanaly.kategoriaSprawy;
-    const kategoriaKanal = kategoriaRaw && interaction.guild.channels.cache.get(kategoriaRaw);
-    const kategoria = kategoriaKanal?.type === ChannelType.GuildCategory ? kategoriaRaw : null;
-    if (kategoriaRaw && !kategoria) {
-      console.error(`[pozew] KATEGORIA_SPRAWY (${kategoriaRaw}) nie jest kategorią - tworzę kanał bez parent.`);
-    }
+    // Kategoria „Rozprawy sądowe” (KATEGORIA_SPRAWY albo domyślna z configu)
+    const kategoria = await kategoriaSpraw(interaction.guild);
     // Nadpisanie uprawnień dla osoby spoza serwera wysypałoby tworzenie kanału
     const pozwanyNaSerwerze = pozwanyId && await interaction.guild.members.fetch(pozwanyId).catch(() => null);
     const dostepStrony = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory];
-    const kanal = await interaction.guild.channels.create({
+    const ustawieniaKanalu = {
       name: `${config.sad.prefixSprawy}${numer.toLowerCase()}`.slice(0, 90),
       type: ChannelType.GuildText,
       parent: kategoria,
@@ -122,6 +125,13 @@ module.exports = {
         ...(pozwanyNaSerwerze && pozwanyId !== interaction.user.id ? [{ id: pozwanyId, allow: dostepStrony }] : []),
         ...staff.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] })),
       ],
+    };
+    // Pełna kategoria (limit 50 kanałów) albo brak dostępu do niej - sprawa i tak powstaje, bez kategorii
+    let bladKategorii = null;
+    const kanal = await interaction.guild.channels.create(ustawieniaKanalu).catch(async (e) => {
+      if (!kategoria) throw e;
+      bladKategorii = e.message;
+      return interaction.guild.channels.create({ ...ustawieniaKanalu, parent: null });
     });
 
     const sprawa = db.prepare('SELECT * FROM sprawy WHERE id = ?').get(sprawaId);
@@ -130,7 +140,8 @@ module.exports = {
 
     await log(interaction.client, {
       tytul: 'Nowy pozew',
-      opis: `**Sprawa:** ${numer}\n**Pozywający:** <@${interaction.user.id}>\n**Pozwany:** ${typ === 'gracz' ? `<@${pozwany}>` : `Państwo **${pozwany}**`}\n**Kanał:** <#${kanal.id}>`,
+      opis: `**Sprawa:** ${numer}\n**Pozywający:** <@${interaction.user.id}>\n**Pozwany:** ${typ === 'gracz' ? `<@${pozwany}>` : `Państwo **${pozwany}**`}\n**Kanał:** <#${kanal.id}>` +
+        (kategoria && !bladKategorii ? '' : `\n**Uwaga:** kanał powstał poza kategorią „Rozprawy sądowe” (${bladKategorii || 'nie znaleziono kategorii'})`),
       kolor: kolory.info,
       kanal: 'logiSad',
     });

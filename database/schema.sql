@@ -308,3 +308,10 @@ CREATE TABLE IF NOT EXISTS stan (
   klucz TEXT PRIMARY KEY,
   wartosc TEXT
 );
+
+-- Ręczne zdjęcie cooldownu pozwu (/sprawa-cooldown): pozwy sprzed tej chwili nie blokują kolejnego
+CREATE TABLE IF NOT EXISTS pozew_cooldown_reset (
+  user_id TEXT PRIMARY KEY,
+  data INTEGER NOT NULL,
+  przez TEXT NOT NULL
+);

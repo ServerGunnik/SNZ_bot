@@ -38,6 +38,11 @@ const maDostepDoModeracji = (member) => jestStaff(member) || jestHelperem(member
 // Zabiera prawo banowania helperom i jr adminom, chyba że są wpisani w ROLA_BAN.
 const mozeBanowac = (member) => wszechwladny(member) || maRole(member, config.role.ban);
 
+// Prokurator - osobny cooldown pozwów i /sprawa-prokuratora (tylko z rolą, bez wyjątku dla właściciela)
+const jestProkuratorem = (member) => maRole(member, config.role.prokurator);
+// Zdejmowanie cooldownu pozwu: Admin/Sędzia (ROLA_ADMIN_SADU), właściciel i technik. Helperzy i gracze - nie.
+const mozeZdjacCooldownSadu = (member) => wszechwladny(member) || maRole(member, config.role.adminSadu);
+
 // Ranga oparta o pozycję roli na serwerze. Wyższa pozycja = wyższa ranga.
 // Właściciel i technik = Infinity. Osoby bez żadnej uznawanej roli staffu/helpera = 0.
 function rangaStaffu(member) {
@@ -85,6 +90,6 @@ const rolaAdministracyjna = (rola) => Boolean(rola) && maUprawnienia(rola.permis
 
 module.exports = {
   maRole, pingRol, wszechwladny, jestStaff, jestLider, jestSedzia, jestZweryfikowany,
-  jestHelperem, maDostepDoModeracji, mozeBanowac, rangaStaffu,
+  jestHelperem, maDostepDoModeracji, mozeBanowac, rangaStaffu, jestProkuratorem, mozeZdjacCooldownSadu,
   UPRAWNIENIA_ADMINISTRACYJNE, UPRAWNIENIA_NIE_DLA_SELFROLE, maUprawnienia, rolaAdministracyjna,
 };
