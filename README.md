@@ -60,6 +60,7 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 - `/antynuke whitelist-dodaj|whitelist-usun` — tylko właściciel serwera albo technik.
 - `/bot-uprawnienia lista` — boty objęte blokadą uprawnień; `przywroc` / `zablokuj` — tylko właściciel serwera.
 - `/przywroc-role <osoba>` — właściciel / technik: przywraca role odebrane za usunięcie logu i zdejmuje wyciszenie.
+- `/recru stwórz|usuń` — rekrutacja: **Poczekalnia rekrutacyjna** (kandydaci nie mogą mówić) i kanał **Rekrutacja** (widoczny dla staffu; przeniesiony kandydat dostaje prawo mówienia). `usuń` kasuje wszystkie kanały rekrutacji. Bot potrzebuje: Zarządzanie kanałami, Zarządzanie rolami, Przenoszenie członków.
 
 ### Liderzy (rola „Lider")
 - `/sojusz` — panel państwa dla króla (dodaj/usuń nick, zmień status Zastępca/Członek, paginacja). Tylko król może zarządzać składem.
@@ -73,6 +74,10 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 - `/sojusz-lista` — lista państw i ich graczy (król, zastępcy, członkowie) + przycisk **Config dla moda** (plik `snz-sojusz.json`).
 - `/warny <user>` — własna historia (staff widzi wszystkich).
 - Panele: weryfikacja, tickety (przyciski kategorii), selfrole.
+
+## Aktualizacje (update-log)
+
+Każda zmiana w bocie to nowy wpis na końcu [`aktualizacje.js`](aktualizacje.js) (🆕 dodano/zmieniono, 🔧 naprawiono, 📝 opis). Przy starcie bot sam wysyła na kanał `update-log` (`KANAL_UPDATE_LOG`, domyślnie `1536121456037990491`) wpisy, których jeszcze nie opublikował — wystarczy wdrożyć kod i zrestartować bota.
 
 ## Moduły
 

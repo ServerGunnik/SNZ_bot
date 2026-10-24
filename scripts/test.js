@@ -694,6 +694,67 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(kanalLogow.wyslane.length >= przed3 + 2 && zdarzeniaAdmina.includes('role-:R_ADMIN'), 'masowe usunięcie: logi wracają, sprawca ukarany');
 
   // ---------------------------------------------------------------------
+  sekcja('Rekrutacja (/recru)');
+  await bezpiecznie('rekrutacja', async () => {
+    const { PermissionFlagsBits } = require('discord.js');
+    const rekrutacja = wymagaj('modules/rekrutacja.js');
+    const kanalyRek = new Collection();
+    const edytowane = [];
+    let nr = 0;
+    const gildia = {
+      id: 'GILDIA',
+      client: { user: { id: 'BOT' } },
+      roles: { cache: new Collection([['STAFF', {}]]) },
+      // Bot nie ma MuteMembers - overwrite nie może go przyznać
+      members: { me: { permissions: { has: (p) => p !== PermissionFlagsBits.MuteMembers && p !== PermissionFlagsBits.Administrator } } },
+      channels: {
+        cache: kanalyRek,
+        create: async (o) => {
+          const k = {
+            id: `REK${++nr}`, name: o.name, type: o.type, parentId: o.parent || null, opcje: o,
+            delete: async () => { kanalyRek.delete(k.id); },
+            permissionOverwrites: { edit: async (id, p) => edytowane.push({ kanal: k.id, id, p }) },
+          };
+          kanalyRek.set(k.id, k);
+          return k;
+        },
+      },
+    };
+    const wynik = await rekrutacja.stworz(gildia, 'AUTOR');
+    sprawdz(!wynik.blad && wynik.poczekalnia && wynik.pokoj, `/recru stworz tworzy kanały (${wynik.blad})`);
+    const ow = (k) => k.opcje.permissionOverwrites;
+    sprawdz(ow(wynik.poczekalnia).find(o => o.id === 'GILDIA').deny.includes(PermissionFlagsBits.Speak), 'poczekalnia: @everyone nie może mówić');
+    sprawdz(ow(wynik.pokoj).find(o => o.id === 'GILDIA').deny.includes(PermissionFlagsBits.ViewChannel), 'kanał rekrutacji ukryty dla @everyone');
+    sprawdz(ow(wynik.pokoj).some(o => o.id === 'STAFF') && !ow(wynik.pokoj).some(o => o.id === 'LIDER'), 'pominięta rola, której nie ma na serwerze');
+    sprawdz(!ow(wynik.pokoj).some(o => o.allow?.includes(PermissionFlagsBits.MuteMembers)), 'brak uprawnień, których bot nie ma');
+    sprawdz((await rekrutacja.stworz(gildia, 'AUTOR')).blad === 'już trwa', 'druga rekrutacja blokowana');
+
+    const kandydat = { id: 'KANDYDAT', user: { bot: false }, roles: { cache: new Map() }, permissions: { has: () => false }, voice: { setMute: async () => {} } };
+    await rekrutacja.obsluzZmianeStanuGlosowego(
+      { channelId: wynik.poczekalnia.id, member: kandydat },
+      { channelId: wynik.pokoj.id, channel: wynik.pokoj, member: kandydat, serverMute: false });
+    sprawdz(edytowane.some(e => e.kanal === wynik.pokoj.id && e.id === 'KANDYDAT' && e.p.Speak), 'przeniesiony kandydat może mówić');
+
+    const usuniecie = await rekrutacja.usun(gildia, 'admin');
+    sprawdz(!usuniecie.bledy.length && kanalyRek.size === 0, '/recru usun kasuje poczekalnię, kanał i kategorię');
+    sprawdz((await rekrutacja.usun(gildia, 'admin')).nic, 'po usunięciu brak aktywnej rekrutacji');
+  });
+
+  // ---------------------------------------------------------------------
+  sekcja('Update-log');
+  await bezpiecznie('update-log', async () => {
+    const aktualizacje = wymagaj('aktualizacje.js');
+    const idki = aktualizacje.map(a => a.id);
+    sprawdz(new Set(idki).size === idki.length, 'aktualizacje.js: unikalne id');
+    sprawdz(aktualizacje.every(a => a.id && a.tytul && a.data && (a.dodano?.length || a.naprawiono?.length) && a.opis), 'aktualizacje.js: każdy wpis ma tytuł, datę, zmiany i opis');
+    const updateLog = wymagaj('modules/update-log.js');
+    const przed = wyslaneWyslij.length;
+    const wyslane = await updateLog.opublikujNowe({});
+    sprawdz(wyslane === aktualizacje.length && wyslaneWyslij[przed]?.kanal === config.kanaly.updateLog, 'nowe wpisy trafiają na kanał update-log');
+    sprawdz(await updateLog.opublikujNowe({}) === 0, 'wpis publikowany tylko raz');
+  });
+
+  // ---------------------------------------------------------------------
   console.log(`\n${testy - bledy}/${testy} sprawdzeń OK`);
   process.exit(bledy ? 1 : 0);
 })().catch((e) => {

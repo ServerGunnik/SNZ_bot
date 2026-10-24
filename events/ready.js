@@ -24,6 +24,8 @@ module.exports = {
     require('../modules/blokady.js').uruchomBlokady();
     require('../modules/blokada-botow.js').sprawdzPoUruchomieniu(client)
       .catch((e) => console.error('[ready] blokada botów', e));
+    require('../modules/update-log.js').opublikujNowe(client)
+      .catch((e) => console.error('[ready] update-log', e));
     await require('../modules/wolanie-moda.js').przywrocWezwania(client)
       .catch((e) => console.error('[ready] przywracanie wezwań', e));
   },
