@@ -277,6 +277,13 @@ CREATE TABLE IF NOT EXISTS rekrutacja (
 );
 CREATE INDEX IF NOT EXISTS idx_rekrutacja_aktywna ON rekrutacja(aktywna);
 
+-- UPDATE-LOG: wpisy z aktualizacje.js już wysłane na kanał update-log
+CREATE TABLE IF NOT EXISTS aktualizacje_opublikowane (
+  id TEXT PRIMARY KEY,
+  wiadomosc_id TEXT,
+  data INTEGER NOT NULL
+);
+
 -- ANKIETY ANONIMOWE: bot sam liczy głosy, nigdy nie pokazuje kto na co głosował.
 -- Natywne ankiety Discorda (bez tej tabeli) i tak pokazują listę głosujących - dla nich używamy Discord Poll API.
 CREATE TABLE IF NOT EXISTS ankiety (

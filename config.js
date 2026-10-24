@@ -32,6 +32,8 @@ module.exports = {
     // Wyroki z rozpraw niepublicznych („sprawy-sąd”, tylko dla uprawnionych)
     wyrokiPrywatne: process.env.KANAL_WYROKI_PRYWATNE || '1561416148019585165',
     modCall: process.env.KANAL_MOD_CALL,
+    // Kanał update-log: automatyczne ogłoszenia zmian w bocie (wpisy z aktualizacje.js)
+    updateLog: process.env.KANAL_UPDATE_LOG || '1536121456037990491',
     kategoriaTickety: process.env.KATEGORIA_TICKETY,
     // Kategoria „Rozprawy sądowe” - jeśli ID z .env nie jest kategorią, bot używa domyślnej
     kategoriaSprawy: process.env.KATEGORIA_SPRAWY,
