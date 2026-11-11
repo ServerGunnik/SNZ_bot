@@ -119,6 +119,18 @@ module.exports = {
         // Staff może wystawić list gończy jednym przyciskiem z danych formularza
         listGonczy: { nick: 'nick', powod: 'powod', nagroda: 'nagroda' },
       },
+      {
+        value: 'skargi', label: 'Skargi i wnioski', emoji: '📨', opis: 'Złóż skargę lub wniosek do sądu',
+        pola: [
+          { id: 'nick', label: 'Twój nick w Minecraft', styl: 'krotki', min: 3, max: 16, nick: true },
+          { id: 'rodzaj', label: 'Skarga czy wniosek?', styl: 'krotki', min: 5, max: 20 },
+          { id: 'dotyczy', label: 'Kogo lub czego dotyczy? (gracz, sprawa)', styl: 'krotki', min: 2, max: 100 },
+          { id: 'tresc', label: 'Treść skargi lub wniosku', styl: 'dlugi', min: 20, max: 1500 },
+          { id: 'dowody', label: 'Dowody (linki do screenów/nagrań)', styl: 'dlugi', max: 1000, wymagane: false },
+        ],
+        // Oprócz staffu ticket widzą i obsługują rangi sądu (klucze z config.role)
+        roleDodatkowe: ['adminSadu'],
+      },
     ],
     // Wynik wybierany przy zamykaniu ticketu
     wyniki: {

@@ -186,13 +186,19 @@ async function resetujPanel(interaction) {
   await wiad.edit(karty.panelTicketow(config.tickety.kategorie)).catch(() => null);
 }
 
-// Ticket otwarty, a klikający jest staffem/helperem - w przeciwnym razie odpowiada błędem i zwraca null
+// Role spoza staffu, które obsługują daną kategorię (np. rangi sądu w „Skargach i wnioskach”)
+function roleDodatkowe(kodKategorii) {
+  const kategoria = config.tickety.kategorie.find(k => k.value === kodKategorii);
+  return [...new Set((kategoria?.roleDodatkowe || []).flatMap(klucz => config.role[klucz] || []))];
+}
+
+// Ticket otwarty, a klikający jest staffem/helperem (albo ma rolę obsługującą tę kategorię) - w przeciwnym razie odpowiada błędem i zwraca null
 function ticketDlaStaffu(interaction, idStr) {
-  if (!maDostepDoModeracji(interaction.member)) {
+  const ticket = idStr ? q.poId.get(parseInt(idStr, 10)) : q.poKanale.get(interaction.channel.id);
+  if (!maDostepDoModeracji(interaction.member) && !maRole(interaction.member, roleDodatkowe(ticket?.kategoria_kod))) {
     odpowiedz(interaction, karty.kartaBlad('Brak uprawnień', 'Ta akcja jest dostępna tylko dla administracji.'));
     return null;
   }
-  const ticket = idStr ? q.poId.get(parseInt(idStr, 10)) : q.poKanale.get(interaction.channel.id);
   if (!ticket || ticket.status !== 'otwarty') {
     odpowiedz(interaction, karty.kartaBlad('Brak ticketu', 'Ten ticket jest już zamknięty.'));
     return null;
@@ -276,6 +282,7 @@ async function onFormularz(interaction) {
   const kategoriaKanal = kategoriaK?.type === ChannelType.GuildCategory ? kategoriaId : null;
   const staffRole = config.role.staff;
   const helperRole = config.role.helper;
+  const dodatkoweRole = roleDodatkowe(kategoria.value).filter(id => !staffRole.includes(id) && !helperRole.includes(id));
   const nickPole = pola.find(p => kategoria.pola.find(k => k.id === p.id)?.nick);
   const temat = `${kategoria.label}${nickPole?.wartosc ? `: ${nickPole.wartosc}` : ''}`;
 
@@ -292,13 +299,15 @@ async function onFormularz(interaction) {
       ...staffRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory] })),
       // Helper: pisanie + załączniki, bez ManageMessages (nie może usuwać/przypinać cudzych wiadomości)
       ...helperRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
+      // Role obsługujące tę kategorię (np. sąd przy skargach i wnioskach)
+      ...dodatkoweRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
     ],
   });
 
   const info = q.wstaw.run(kanal.id, interaction.user.id, kategoria.label, kategoria.value, JSON.stringify(pola), temat, Date.now());
   const ticket = q.poId.get(info.lastInsertRowid);
 
-  const rolaDoPingu = [...staffRole, ...helperRole];
+  const rolaDoPingu = [...staffRole, ...helperRole, ...dodatkoweRole];
   const pingStaff = rolaDoPingu.length ? ` ${rolaDoPingu.map(id => `<@&${id}>`).join(' ')}` : '';
   await kanal.send({
     content: `<@${interaction.user.id}>${pingStaff}`,

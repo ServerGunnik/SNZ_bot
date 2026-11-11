@@ -224,6 +224,27 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(db.prepare('SELECT status, wynik FROM tickety WHERE id = 1').get().wynik === 'udane', 'ticket zamknięty z wynikiem');
   sprawdz(kanaly.get('HIST').wyslane.length >= 1, 'wpis w historii ticketów');
 
+  // Skargi i wnioski: ticket widzi i może przejąć ranga sądu (bez roli staffu)
+  await bezpiecznie('skargi i wnioski', async () => {
+    const katSkargi = kategorie.find(k => k.value === 'skargi');
+    sprawdz(katSkargi?.label === 'Skargi i wnioski', 'kategoria ticketów „Skargi i wnioski”');
+    const adminSaduPrzed = config.role.adminSadu;
+    config.role.adminSadu = ['SAD'];
+    const tworzenie = guild.channels.create;
+    const opcjeKanalow = [];
+    guild.channels.create = async (o) => { opcjeKanalow.push(o); return tworzenie(o); };
+    const daneSkargi = Object.fromEntries(katSkargi.pola.map(p => [p.id, p.nick ? 'Steve' : 'x'.repeat(Math.max(p.min || 1, 25))]));
+    await znajdz('ticket:formularz:skargi')(atrapa('ticket:formularz:skargi', gracz, { fields: { getTextInputValue: (id) => daneSkargi[id] || '' } }));
+    guild.channels.create = tworzenie;
+    const skarga = db.prepare("SELECT * FROM tickety WHERE kategoria_kod = 'skargi'").get();
+    sprawdz(skarga && opcjeKanalow[0]?.permissionOverwrites.some(o => o.id === 'SAD'), 'ranga sądu widzi ticket skargi');
+    const sedziaSadu = { roles: { cache: new Map([['SAD', 1]]) }, permissions: { has: () => false } };
+    await znajdz('ticket:przejmij')(atrapa('ticket:przejmij', sedziaSadu, { user: { id: 'SEDZIA_SADU' }, channel: kanaly.get(skarga.kanal_id) }));
+    sprawdz(db.prepare('SELECT przydzielony FROM tickety WHERE id = ?').get(skarga.id).przydzielony === 'SEDZIA_SADU', 'ranga sądu może przejąć skargę');
+    config.role.adminSadu = adminSaduPrzed;
+    db.prepare("UPDATE tickety SET status = 'zamkniety' WHERE id = ?").run(skarga.id);
+  });
+
   // ---------------------------------------------------------------------
   sekcja('Ostrzeżenia: wygasanie i wyroki sądu');
   const ostrz = wymagaj('modules/ostrzezenia.js');
@@ -534,7 +555,8 @@ const karty = wymagaj('utils/karty.js');
   };
   db.prepare("UPDATE sprawy SET status = 'wyrok', sedzia_id = 'SEDZIA_OK', werdykt = 'winny', kara = 'ban', wyrok_data = 1 WHERE id = ?").run(sprawaA.id);
   const wyslanePubliczne = await publikuj(sprawaA.id, 'tak');
-  sprawdz(wyslanePubliczne.length === 1 && wyslanePubliczne[0].kanal === '1561390273504878632', 'rozprawa publiczna → kanał „wyroki sądowe”');
+  sprawdz(wyslanePubliczne.length === 2 && wyslanePubliczne[0].kanal === '1561390273504878632', 'rozprawa publiczna → kanał „wyroki sądowe”');
+  sprawdz(wyslanePubliczne[1]?.kanal === config.kanaly.logiSad, 'publiczny wyrok zapisany w całości w logach sądu');
   sprawdz((await publikuj(sprawaA.id, 'nie')).length === 0, 'decyzja o publikacji zapada raz (brak drugiej wysyłki)');
   const sprawaB = db.prepare("SELECT * FROM sprawy WHERE pozywajacy_id = 'PROKURATOR'").get();
   db.prepare("UPDATE sprawy SET status = 'wyrok', sedzia_id = 'SEDZIA_OK', werdykt = 'w', kara = 'k', wyrok_data = 1 WHERE id = ?").run(sprawaB.id);
