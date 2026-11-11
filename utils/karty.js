@@ -662,9 +662,10 @@ const WYROK_WOBEC_EMOJI = {
   usunieta: '🗑️',
 };
 
-function kartaWyroku({ sprawa }) {
-  const c = kontener(kolory.sukces);
-  c.addTextDisplayComponents(tekst(`## Wyrok w sprawie ${sprawa.numer}`));
+// wykonanie: { zobowiazani: [{ userId, rola, kara, splata: { oznaczyl, data } | null }], kary: [wiersze sprawy_kary], splacona }
+function kartaWyroku({ sprawa, wykonanie = null }) {
+  const c = kontener(wykonanie?.splacona ? kolory.neutralny : kolory.sukces);
+  c.addTextDisplayComponents(tekst(`## ${wykonanie?.splacona ? '✅ ' : ''}Wyrok w sprawie ${sprawa.numer}`));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(
     `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
@@ -676,6 +677,19 @@ function kartaWyroku({ sprawa }) {
   ));
   c.addSeparatorComponents(separator(true));
   c.addTextDisplayComponents(tekst(`**Werdykt:** ${sprawa.werdykt}\n**Kara:** ${sprawa.kara}`));
+  if (wykonanie?.kary.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst('### Dodatkowe kary z rozprawy\n' + wykonanie.kary.map(k =>
+      `• <@${k.user_id}> — ${k.kara}${k.powod ? ` _(${k.powod})_` : ''}`).join('\n').slice(0, 1500)));
+  }
+  if (wykonanie?.zobowiazani.length) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(
+      `### Wykonanie wyroku — ${wykonanie.splacona ? '✅ sprawa spłacona' : '⏳ w trakcie'}\n` +
+      wykonanie.zobowiazani.map(z => z.splata
+        ? `✅ <@${z.userId}> (${z.rola}) — spłacił(a), oznaczył(a) <@${z.splata.oznaczyl}> <t:${Math.floor(z.splata.data / 1000)}:f>`
+        : `⏳ <@${z.userId}> (${z.rola}) — nie spłacono`).join('\n').slice(0, 1500)));
+  }
   return { components: [c], ...FLAGS_V2 };
 }
 

@@ -70,6 +70,9 @@ Kopie zapasowe bazy zapisują się automatycznie w `database/kopie/` (przy starc
 - `/pozew` — pozew do Sądu Sojuszniczego przeciw graczowi (wybór **konta Discord**) albo państwu. Cooldown: 12 h, dla rangi **Prokurator** 10 min (`config.js` → `pozew`).
 - `/sprawa-prokuratora [numer]` — **Prokurator**: przypisuje siebie jako oskarżającego (na kanale sprawy albo po numerze). Na karcie sprawy pojawia się „⚖️ Oskarżający: Prokurator — nick” (nick z weryfikacji, inaczej nazwa na serwerze).
 - `/sprawa-cooldown <osoba>` — **Admin/Sędzia (`ROLA_ADMIN_SADU`), założyciel, technik**: zdejmuje cooldown, żeby osoba mogła od razu utworzyć kolejną rozprawę.
+- `/sprawa-splacona <osoba> [numer]` — **sędzia sprawy, ranga sądu, staff**: oznacza, że osoba wykonała swoją karę. Karta wyroku (na #wyroki-sądowe / kanale spraw niepublicznych i w logach sądu) pokazuje, kto spłacił i kto to oznaczył; sprawa jest spłacona, gdy kary wykonają wszyscy ukarani (strony wyroku i osoby z dodatkowymi karami).
+- `/sprawa-dodaj-kare <osoba> <kara> [powód] [numer]` — **sędzia sprawy, ranga sądu, staff**: dodatkowa kara dla dowolnego uczestnika rozprawy (widz, świadek, obrońca); trafia na kanał sprawy, do logów sądu, historii ostrzeżeń i na kartę wyroku.
+- `/sprawa-dodaj <osoba> [numer]` — **sędzia sprawy, ranga sądu, staff**: daje osobie dostęp do kanału rozprawy.
 - `/listy-goncze` — przegląd aktywnych i zakończonych listów gończych (administracja widzi też oczekujące).
 - `/sojusz-lista` — lista państw i ich graczy (król, zastępcy, członkowie) + przycisk **Config dla moda** (plik `snz-sojusz.json`).
 - `/warny <user>` — własna historia (staff widzi wszystkich).

@@ -561,8 +561,52 @@ const karty = wymagaj('utils/karty.js');
   const sprawaB = db.prepare("SELECT * FROM sprawy WHERE pozywajacy_id = 'PROKURATOR'").get();
   db.prepare("UPDATE sprawy SET status = 'wyrok', sedzia_id = 'SEDZIA_OK', werdykt = 'w', kara = 'k', wyrok_data = 1 WHERE id = ?").run(sprawaB.id);
   const wyslanePrywatne = await publikuj(sprawaB.id, 'nie');
-  sprawdz(wyslanePrywatne.length === 1 && wyslanePrywatne[0].kanal === '1561416148019585165', 'rozprawa niepubliczna → kanał „sprawy-sąd”');
+  sprawdz(wyslanePrywatne.length === 2 && wyslanePrywatne[0].kanal === '1561416148019585165', 'rozprawa niepubliczna → kanał „sprawy-sąd”');
+  sprawdz(wyslanePrywatne[1]?.kanal === config.kanaly.logiSad, 'niepubliczny wyrok też zapisany w logach sądu');
+  sprawdz(db.prepare('SELECT wyrok_wiadomosc_id, wyrok_log_id FROM sprawy WHERE id = ?').get(sprawaB.id).wyrok_log_id, 'zapamiętano wiadomości z wyrokiem');
   db.prepare("DELETE FROM sprawy WHERE pozywajacy_id IN ('POWOD_A', 'PROKURATOR')").run();
+
+  // ---------------------------------------------------------------------
+  sekcja('Sąd: spłata wyroku, dodatkowe kary, uczestnicy');
+  const edytowaneWyroki = [];
+  const kanalWyroku = (id) => Object.assign(nowyKanal(id), {
+    messages: { fetch: async (wid) => ({ edit: async (p) => edytowaneWyroki.push({ kanal: id, wid, tekst: JSON.stringify(p.components.map(c => c.toJSON())) }) }) },
+  });
+  kanalWyroku('WYR');
+  kanalWyroku('LOGI_SAD');
+  const logiSadPrzed = config.kanaly.logiSad;
+  config.kanaly.logiSad = 'LOGI_SAD';
+  const kanalSprawy = nowyKanal('KSPRAWY50');
+  const dostepy = [];
+  kanalSprawy.permissionOverwrites.edit = async (id, p) => dostepy.push({ id, p });
+  db.prepare(`INSERT INTO sprawy (id, numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, utworzona, sedzia_id, status, werdykt, kara,
+    wyrok_wobec, wyrok_data, kanal_id, publikacja_data, wyrok_kanal_id, wyrok_wiadomosc_id, wyrok_log_id)
+    VALUES (50, 'SNZ-2026-0050', 'P1', 'gracz', 'P2', 'z', 'o', 0, 'SEDZIA_OK', 'wyrok', 'winni', '10 diamentów', 'oboje', 1, 'KSPRAWY50', 1, 'WYR', 'W1', 'L1')`).run();
+  const sprawa50 = () => db.prepare('SELECT * FROM sprawy WHERE id = 50').get();
+  sprawdz((await sad.oznaczSplate(client, sprawa50(), 'OBCY', 'SEDZIA_OK')).blad?.includes('nie ma kary'), 'spłata osoby bez kary odrzucona');
+  await sad.dodajKare(client, sprawa50(), 'WIDZ', '5 diamentów', 'przeszkadzał', 'SEDZIA_OK');
+  sprawdz(kanalSprawy.wyslane.some(p => JSON.stringify(p.components.map(c => c.toJSON())).includes('Dodatkowa kara')), 'dodatkowa kara ogłoszona na kanale sprawy');
+  sprawdz(db.prepare("SELECT 1 FROM ostrzezenia WHERE user_id = 'WIDZ' AND sprawa_id = 50").get(), 'dodatkowa kara w historii ostrzeżeń');
+  const s1 = await sad.oznaczSplate(client, sprawa50(), 'P1', 'SEDZIA_OK');
+  sprawdz(s1.stan && !s1.stan.splacona && s1.pozostali.length === 2, 'po spłacie jednej strony sprawa nie jest spłacona');
+  await sad.oznaczSplate(client, sprawa50(), 'P2', 'SEDZIA_OK');
+  const s3 = await sad.oznaczSplate(client, sprawa50(), 'WIDZ', 'SEDZIA_OK');
+  sprawdz(s3.stan?.splacona, 'sprawa spłacona dopiero, gdy wszyscy wykonali kary');
+  sprawdz((await sad.oznaczSplate(client, sprawa50(), 'P1', 'SEDZIA_OK')).blad?.includes('już spłacił'), 'nie da się oznaczyć spłaty dwa razy');
+  const ostatniaKarta = edytowaneWyroki.filter(e => e.kanal === 'WYR').at(-1)?.tekst || '';
+  sprawdz(ostatniaKarta.includes('sprawa spłacona') && ostatniaKarta.includes('<@P2>') && ostatniaKarta.includes('<@SEDZIA_OK>'), 'karta na #wyroki-sądowe pokazuje, kto spłacił');
+  sprawdz(edytowaneWyroki.some(e => e.kanal === 'LOGI_SAD' && e.wid === 'L1'), 'karta wyroku w logach sądu też odświeżona');
+  await sad.dodajUczestnika(client, sprawa50(), 'GOSC', 'SEDZIA_OK');
+  sprawdz(dostepy.some(d => d.id === 'GOSC' && d.p.ViewChannel && d.p.SendMessages), '/sprawa-dodaj daje dostęp do kanału sprawy');
+  const odpKomend = [];
+  await wymagaj('commands/sprawa-splacona.js').execute({
+    member: gracz, user: { id: 'GRACZ' }, channelId: 'KSPRAWY50', client, guild,
+    options: { getString: () => null, getUser: () => ({ id: 'P1' }) },
+    reply: async (p) => odpKomend.push(JSON.stringify(p.components[0].toJSON())),
+  });
+  sprawdz(odpKomend[0]?.includes('Brak uprawnień'), 'zwykły gracz nie oznaczy spłaty');
+  config.kanaly.logiSad = logiSadPrzed;
+  db.prepare('DELETE FROM sprawy WHERE id = 50').run();
 
   // ---------------------------------------------------------------------
   sekcja('List gończy: zgłoszenie zatrzymania z dowodem');

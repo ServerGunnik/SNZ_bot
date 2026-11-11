@@ -4,7 +4,7 @@ const {
 const db = require('../database/db.js');
 const config = require('../config.js');
 const karty = require('../utils/karty.js');
-const { jestStaff, jestProkuratorem } = require('../utils/uprawnienia.js');
+const { jestStaff, jestProkuratorem, mozeZdjacCooldownSadu } = require('../utils/uprawnienia.js');
 const { log, wyslij } = require('../utils/logger.js');
 const { transkrypt } = require('../utils/transkrypt.js');
 const kolory = require('../utils/kolory.js');
@@ -34,6 +34,13 @@ const q = {
   ustawProkuratora: db.prepare("UPDATE sprawy SET prokurator_id = ?, prokurator_nick = ? WHERE id = ? AND prokurator_id IS NULL AND status IN ('zlozona','przyjeta','w_toku')"),
   // Decyzja o publikacji zapada raz - drugi klik nie wyśle wyroku ponownie
   ustawPubliczny: db.prepare('UPDATE sprawy SET wyrok_publiczny = ?, publikacja_data = ? WHERE id = ? AND publikacja_data IS NULL'),
+  poNumerze: db.prepare('SELECT * FROM sprawy WHERE numer = ? COLLATE NOCASE'),
+  poKanale: db.prepare('SELECT * FROM sprawy WHERE kanal_id = ?'),
+  zapiszWiadomosciWyroku: db.prepare('UPDATE sprawy SET wyrok_kanal_id = ?, wyrok_wiadomosc_id = ?, wyrok_log_id = ? WHERE id = ?'),
+  kary: db.prepare('SELECT * FROM sprawy_kary WHERE sprawa_id = ? ORDER BY id'),
+  wstawKare: db.prepare('INSERT INTO sprawy_kary (sprawa_id, user_id, kara, powod, nalozyl, data) VALUES (?, ?, ?, ?, ?, ?)'),
+  splaty: db.prepare('SELECT * FROM sprawy_splaty WHERE sprawa_id = ?'),
+  wstawSplate: db.prepare('INSERT OR IGNORE INTO sprawy_splaty (sprawa_id, user_id, oznaczyl, data) VALUES (?, ?, ?, ?)'),
 };
 
 // ---- Cooldown pozwów ---------------------------------------------------
@@ -388,11 +395,11 @@ async function onWyrokPublikuj(interaction) {
   // Rozprawa publiczna -> kanał „wyroki sądowe”, niepubliczna -> kanał „sprawy-sąd”
   const spr = q.poId.get(id);
   const kanalDocelowy = publicznie ? kanalWyrokowPublicznych(interaction.guild) : config.kanaly.wyrokiPrywatne;
-  const wyslana = kanalDocelowy ? await wyslij(interaction.client, kanalDocelowy, karty.kartaWyroku({ sprawa: spr })) : null;
-  // Publiczny wyrok zostaje też w całości w logach sądu (archiwum niezależne od kanału wyroków)
-  if (publicznie) {
-    await wyslij(interaction.client, config.kanaly.logiSad, { ...karty.kartaWyroku({ sprawa: spr }), allowedMentions: { parse: [] } });
-  }
+  const kartaW = kartaWyrokuSprawy(spr);
+  const wyslana = kanalDocelowy ? await wyslij(interaction.client, kanalDocelowy, kartaW) : null;
+  // Każdy wyrok (publiczny i niepubliczny) zostaje też w całości w logach sądu
+  const wLogach = await wyslij(interaction.client, config.kanaly.logiSad, { ...kartaW, allowedMentions: { parse: [] } });
+  q.zapiszWiadomosciWyroku.run(wyslana ? kanalDocelowy : null, wyslana?.id || null, wLogach?.id || null, id);
 
   await log(interaction.client, {
     tytul: publicznie ? 'Wyrok opublikowany (rozprawa publiczna)' : 'Wyrok zapisany (rozprawa niepubliczna)',
@@ -407,9 +414,134 @@ async function onWyrokPublikuj(interaction) {
     ...karty.kartaSukces(publicznie ? 'Opublikowano' : 'Zapisano jako niepubliczny',
       (publicznie
         ? 'Wyrok trafił na kanał z wyrokami sądowymi — widoczny dla wszystkich — i został zapisany w logach sądu.'
-        : 'Wyrok trafił na kanał spraw niepublicznych — widoczny tylko dla uprawnionych.') +
+        : 'Wyrok trafił na kanał spraw niepublicznych — widoczny tylko dla uprawnionych — i został zapisany w logach sądu.') +
       (kanalDocelowy && !wyslana ? `\n\n**Uwaga:** nie udało się wysłać na <#${kanalDocelowy}> — sprawdź uprawnienia bota.` : '')),
   });
+}
+
+// ---- Wykonanie wyroku, dodatkowe kary, uczestnicy ----------------------
+
+function znajdzSprawe(numer, kanalId) {
+  return numer ? q.poNumerze.get(numer) : q.poKanale.get(kanalId);
+}
+
+// Prowadzić sprawę (kary, spłaty, dopisywanie osób) może jej sędzia, ranga sądu i staff
+function mozeProwadzicSprawe(member, sprawa) {
+  return sprawa.sedzia_id === member?.id || mozeZdjacCooldownSadu(member) || jestStaff(member);
+}
+
+// Kto musi wykonać karę: strony wskazane w wyroku + osoby z dodatkowymi karami (jedna pozycja na osobę)
+function stanWykonania(sprawa) {
+  const kary = q.kary.all(sprawa.id);
+  const splaty = new Map(q.splaty.all(sprawa.id).map(s => [s.user_id, s]));
+  const osoby = new Map();
+  const dodaj = (userId, rola) => {
+    if (!userId) return;
+    const z = osoby.get(userId);
+    if (z) {
+      if (!z.rola.includes(rola)) z.rola += `, ${rola.toLowerCase()}`;
+      return;
+    }
+    osoby.set(userId, { userId, rola, splata: splaty.get(userId) || null });
+  };
+  if (sprawa.wyrok_data) {
+    const wobec = sprawa.wyrok_wobec || 'pozwany';
+    if (wobec === 'oskarzajacy' || wobec === 'oboje') dodaj(sprawa.pozywajacy_id, 'Oskarżający');
+    if (wobec === 'pozwany' || wobec === 'oboje') dodaj(idPozwanego(sprawa), sprawa.pozwany_typ === 'panstwo' ? 'Pozwany (król państwa)' : 'Pozwany');
+  }
+  for (const k of kary) dodaj(k.user_id, 'Dodatkowa kara');
+  const zobowiazani = [...osoby.values()];
+  return { zobowiazani, kary, splacona: zobowiazani.length > 0 && zobowiazani.every(z => z.splata) };
+}
+
+function kartaWyrokuSprawy(sprawa) {
+  return karty.kartaWyroku({ sprawa, wykonanie: stanWykonania(sprawa) });
+}
+
+// Odświeża opublikowane karty wyroku (kanał wyroków / spraw niepublicznych + logi sądu)
+async function odswiezKartyWyroku(client, sprawaId) {
+  const sprawa = q.poId.get(sprawaId);
+  if (!sprawa?.publikacja_data) return;
+  const karta = kartaWyrokuSprawy(sprawa);
+  for (const [kanalId, wiadId] of [[sprawa.wyrok_kanal_id, sprawa.wyrok_wiadomosc_id], [config.kanaly.logiSad, sprawa.wyrok_log_id]]) {
+    if (!kanalId || !wiadId) continue;
+    const kanal = await client.channels.fetch(kanalId).catch(() => null);
+    const wiad = await kanal?.messages?.fetch(wiadId).catch(() => null);
+    await wiad?.edit({ ...karta, allowedMentions: { parse: [] } }).catch(() => null);
+  }
+}
+
+async function oznaczSplate(client, sprawa, userId, przezId) {
+  if (!sprawa.wyrok_data) return { blad: `W sprawie **${sprawa.numer}** nie zapadł jeszcze wyrok.` };
+  const { zobowiazani } = stanWykonania(sprawa);
+  if (!zobowiazani.length) {
+    return { blad: `W sprawie **${sprawa.numer}** nikt nie ma kary do spłacenia (${karty.WYROK_WOBEC_ETYKIETY[sprawa.wyrok_wobec] || 'brak kary'}).` };
+  }
+  const osoba = zobowiazani.find(z => z.userId === userId);
+  if (!osoba) {
+    return { blad: `<@${userId}> nie ma kary w sprawie **${sprawa.numer}**.\nKarę mają: ${zobowiazani.map(z => `<@${z.userId}> (${z.rola})`).join(', ')}` };
+  }
+  if (osoba.splata) {
+    return { blad: `<@${userId}> już spłacił(a) karę — oznaczył(a) <@${osoba.splata.oznaczyl}> <t:${Math.floor(osoba.splata.data / 1000)}:f>.` };
+  }
+
+  q.wstawSplate.run(sprawa.id, userId, przezId, Date.now());
+  const stan = stanWykonania(sprawa);
+  await odswiezKartyWyroku(client, sprawa.id);
+  const pozostali = stan.zobowiazani.filter(z => !z.splata);
+  await log(client, {
+    tytul: stan.splacona ? `Sprawa ${sprawa.numer} spłacona w całości` : `Spłata kary — ${sprawa.numer}`,
+    opis: `**Spłacił(a):** <@${userId}> (${osoba.rola})\n**Oznaczył(a):** <@${przezId}>\n` +
+      (stan.splacona ? '✅ Wszystkie kary w sprawie zostały wykonane.' : `⏳ **Jeszcze nie spłacili:** ${pozostali.map(z => `<@${z.userId}>`).join(', ')}`),
+    kolor: stan.splacona ? kolory.sukces : kolory.info,
+    kanal: 'logiSad',
+  });
+  return { stan, osoba, pozostali };
+}
+
+async function dodajKare(client, sprawa, userId, kara, powod, przezId) {
+  if (!['przyjeta', 'w_toku', 'wyrok'].includes(sprawa.status)) {
+    return { blad: `Sprawa **${sprawa.numer}** nie jest w toku — kary można nakładać tylko podczas rozprawy (do jej zamknięcia).` };
+  }
+  q.wstawKare.run(sprawa.id, userId, kara, powod || null, przezId, Date.now());
+  // Dodatkowa kara trafia też do historii ostrzeżeń ukaranego
+  q.wstawWarn.run(userId, `Kara na rozprawie ${sprawa.numer}: ${kara}${powod ? ` (${powod})` : ''}`, przezId, Date.now(), sprawa.id);
+
+  const opis = `**Ukarany(a):** <@${userId}>\n**Kara:** ${kara}${powod ? `\n**Powód:** ${powod}` : ''}\n**Nałożył(a):** <@${przezId}>`;
+  const kanal = sprawa.kanal_id ? await client.channels.fetch(sprawa.kanal_id).catch(() => null) : null;
+  if (kanal) {
+    await kanal.send({
+      ...karty.kartaInfo({ tytul: '⚠️ Dodatkowa kara', opis, kolor: kolory.ostrzezenie }),
+      allowedMentions: { users: [userId] },
+    }).catch(() => null);
+  }
+  await log(client, { tytul: `Dodatkowa kara — ${sprawa.numer}`, opis, kolor: kolory.ostrzezenie, kanal: 'logiSad' });
+  await odswiezKartyWyroku(client, sprawa.id);
+  return { kanalId: kanal?.id || null };
+}
+
+async function dodajUczestnika(client, sprawa, userId, przezId) {
+  if (sprawa.status === 'zamknieta') return { blad: `Sprawa **${sprawa.numer}** jest już zamknięta.` };
+  const kanal = sprawa.kanal_id ? await client.channels.fetch(sprawa.kanal_id).catch(() => null) : null;
+  if (!kanal?.permissionOverwrites) return { blad: `Kanał sprawy **${sprawa.numer}** nie istnieje.` };
+  try {
+    await kanal.permissionOverwrites.edit(userId, {
+      ViewChannel: true, SendMessages: true, ReadMessageHistory: true, AttachFiles: true,
+    }, { reason: `Dodany do sprawy ${sprawa.numer}` });
+  } catch (e) {
+    return { blad: `Nie udało się nadać dostępu: ${e.message}` };
+  }
+  await kanal.send({
+    ...karty.kartaInfo({ tytul: 'Nowy uczestnik rozprawy', opis: `<@${userId}> został(a) dodany(a) do rozprawy przez <@${przezId}>.`, kolor: kolory.info }),
+    allowedMentions: { users: [userId] },
+  }).catch(() => null);
+  await log(client, {
+    tytul: `Dodano uczestnika — ${sprawa.numer}`,
+    opis: `**Osoba:** <@${userId}>\n**Dodał(a):** <@${przezId}>\n**Kanał:** <#${kanal.id}>`,
+    kolor: kolory.info,
+    kanal: 'logiSad',
+  });
+  return { kanalId: kanal.id };
 }
 
 // Stare karty spraw mogą mieć przycisk odwołania
@@ -496,4 +628,5 @@ async function przypiszProkuratora(guild, sprawa, member) {
 module.exports = {
   rejestruj, zamknijSprawe, zmienSedziego, konfliktInteresow, idPozwanego, panstwaUzytkownika,
   stanCooldownu, zdejmijCooldown, kategoriaSpraw, przypiszProkuratora,
+  znajdzSprawe, mozeProwadzicSprawe, stanWykonania, oznaczSplate, dodajKare, dodajUczestnika,
 };
