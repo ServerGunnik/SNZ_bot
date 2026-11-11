@@ -65,6 +65,14 @@ async function kategoriaSpraw(guild) {
   return null;
 }
 
+// Kanał #wyroki-sądowe: ID z configu, a jeśli go nie ma na serwerze - szukamy po nazwie
+function kanalWyrokowPublicznych(guild) {
+  const cache = guild?.channels?.cache;
+  if (config.kanaly.wyroki && (!cache || cache.has(config.kanaly.wyroki))) return config.kanaly.wyroki;
+  const poNazwie = [...cache.values()].find(k => k.type === ChannelType.GuildText && /^wyroki-s[aą]dowe$/i.test((k.name || '').replace(/[^\p{L}\p{N}-]/gu, '')));
+  return poNazwie?.id || config.kanaly.wyroki;
+}
+
 // ---- Strony sprawy i konflikt interesów --------------------------------
 
 // Discord ID pozwanego: gracz wskazany wprost, właściciel nicku (stare sprawy) albo król pozwanego państwa
@@ -379,8 +387,12 @@ async function onWyrokPublikuj(interaction) {
 
   // Rozprawa publiczna -> kanał „wyroki sądowe”, niepubliczna -> kanał „sprawy-sąd”
   const spr = q.poId.get(id);
-  const kanalDocelowy = publicznie ? config.kanaly.wyroki : config.kanaly.wyrokiPrywatne;
+  const kanalDocelowy = publicznie ? kanalWyrokowPublicznych(interaction.guild) : config.kanaly.wyrokiPrywatne;
   const wyslana = kanalDocelowy ? await wyslij(interaction.client, kanalDocelowy, karty.kartaWyroku({ sprawa: spr })) : null;
+  // Publiczny wyrok zostaje też w całości w logach sądu (archiwum niezależne od kanału wyroków)
+  if (publicznie) {
+    await wyslij(interaction.client, config.kanaly.logiSad, { ...karty.kartaWyroku({ sprawa: spr }), allowedMentions: { parse: [] } });
+  }
 
   await log(interaction.client, {
     tytul: publicznie ? 'Wyrok opublikowany (rozprawa publiczna)' : 'Wyrok zapisany (rozprawa niepubliczna)',
@@ -394,7 +406,7 @@ async function onWyrokPublikuj(interaction) {
   await interaction.update({
     ...karty.kartaSukces(publicznie ? 'Opublikowano' : 'Zapisano jako niepubliczny',
       (publicznie
-        ? 'Wyrok trafił na kanał z wyrokami sądowymi — widoczny dla wszystkich.'
+        ? 'Wyrok trafił na kanał z wyrokami sądowymi — widoczny dla wszystkich — i został zapisany w logach sądu.'
         : 'Wyrok trafił na kanał spraw niepublicznych — widoczny tylko dla uprawnionych.') +
       (kanalDocelowy && !wyslana ? `\n\n**Uwaga:** nie udało się wysłać na <#${kanalDocelowy}> — sprawdź uprawnienia bota.` : '')),
   });
