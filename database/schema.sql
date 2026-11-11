@@ -159,6 +159,29 @@ CREATE TABLE IF NOT EXISTS sprawy (
 CREATE INDEX IF NOT EXISTS idx_sprawy_sedzia ON sprawy(sedzia_id, status);
 CREATE INDEX IF NOT EXISTS idx_sprawy_status ON sprawy(status);
 
+-- Dodatkowe kary nałożone podczas rozprawy (/sprawa-dodaj-kare) na dowolnego uczestnika
+CREATE TABLE IF NOT EXISTS sprawy_kary (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sprawa_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  kara TEXT NOT NULL,
+  powod TEXT,
+  nalozyl TEXT NOT NULL,
+  data INTEGER NOT NULL,
+  FOREIGN KEY(sprawa_id) REFERENCES sprawy(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sprawy_kary_sprawa ON sprawy_kary(sprawa_id);
+
+-- Kto wykonał (spłacił) swoją karę w sprawie (/sprawa-splacona)
+CREATE TABLE IF NOT EXISTS sprawy_splaty (
+  sprawa_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  oznaczyl TEXT NOT NULL,
+  data INTEGER NOT NULL,
+  PRIMARY KEY (sprawa_id, user_id),
+  FOREIGN KEY(sprawa_id) REFERENCES sprawy(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS sprawy_dowody (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sprawa_id INTEGER NOT NULL,

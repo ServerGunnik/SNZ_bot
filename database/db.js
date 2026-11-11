@@ -46,6 +46,8 @@ dodajKolumne('sprawy', 'wyrok_publiczny', 'INTEGER DEFAULT 0');
 dodajKolumne('sprawy', 'prokurator_id', 'TEXT');
 dodajKolumne('sprawy', 'prokurator_nick', 'TEXT');
 dodajKolumne('sprawy', 'publikacja_data', 'INTEGER');
+// Wiadomości z kartą wyroku (kanał wyroków / spraw niepublicznych + logi sądu) - odświeżane po spłacie i karach
+for (const k of ['wyrok_kanal_id', 'wyrok_wiadomosc_id', 'wyrok_log_id']) dodajKolumne('sprawy', k, 'TEXT');
 
 db.sciezka = dbPath;
 
