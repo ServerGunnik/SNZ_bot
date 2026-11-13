@@ -176,28 +176,30 @@ async function ustawSedziego(guild, sprawa, userId, wlacz) {
 // ---- Przyjęcie sprawy (raz - sędzia się nie zmienia) --------------------
 
 async function onPrzyjmij(interaction) {
+  // Nadanie roli, uprawnień i logi trwają dłużej niż 3 s, które Discord daje na odpowiedź
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   if (!jestStaff(interaction.member)) {
-    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Sprawy przyjmuje staff (kandydat na sędziego).'), flags: EPHEMERAL_V2 });
+    return interaction.editReply(karty.kartaBlad('Brak uprawnień', 'Sprawy przyjmuje staff (kandydat na sędziego).'));
   }
   const [, , idStr] = interaction.customId.split(':');
   const id = parseInt(idStr, 10);
   const sprawa = q.poId.get(id);
   if (!sprawa || sprawa.status !== 'zlozona' || sprawa.sedzia_id) {
-    return interaction.reply({ ...karty.kartaOstrzezenie('Nie do przyjęcia', 'Ta sprawa ma już sędziego. Sędziego nie można zmienić.'), flags: EPHEMERAL_V2 });
+    return interaction.editReply(karty.kartaOstrzezenie('Nie do przyjęcia', 'Ta sprawa ma już sędziego. Sędziego nie można zmienić.'));
   }
 
   const aktywna = q.aktywnaSedziego.get(interaction.user.id);
   if (aktywna) {
-    return interaction.reply({ ...karty.kartaBlad('Zajęty', `Prowadzisz już sprawę **${aktywna.numer}**. Zakończ ją przed przyjęciem kolejnej.`), flags: EPHEMERAL_V2 });
+    return interaction.editReply(karty.kartaBlad('Zajęty', `Prowadzisz już sprawę **${aktywna.numer}**. Zakończ ją przed przyjęciem kolejnej.`));
   }
 
   const konflikt = konfliktInteresow(sprawa, interaction.user.id);
   if (konflikt) {
-    return interaction.reply({ ...karty.kartaBlad('Konflikt interesów', `Nie możesz orzekać w tej sprawie: ${konflikt}.`), flags: EPHEMERAL_V2 });
+    return interaction.editReply(karty.kartaBlad('Konflikt interesów', `Nie możesz orzekać w tej sprawie: ${konflikt}.`));
   }
 
   if (q.przypisz.run(interaction.user.id, id).changes === 0) {
-    return interaction.reply({ ...karty.kartaOstrzezenie('Nie do przyjęcia', 'Ktoś właśnie przyjął tę sprawę.'), flags: EPHEMERAL_V2 });
+    return interaction.editReply(karty.kartaOstrzezenie('Nie do przyjęcia', 'Ktoś właśnie przyjął tę sprawę.'));
   }
   await ustawSedziego(interaction.guild, sprawa, interaction.user.id, true);
   await aktualizujKarteSprawy(interaction.client, id);
@@ -218,7 +220,7 @@ async function onPrzyjmij(interaction) {
     kanal: 'logiSad',
   });
 
-  await interaction.reply({ ...karty.kartaSukces('Sprawa przyjęta', `Prowadzisz sprawę **${sprawa.numer}**. Sędzia nie zmienia się do końca sprawy.`), flags: EPHEMERAL_V2 });
+  await interaction.editReply(karty.kartaSukces('Sprawa przyjęta', `Prowadzisz sprawę **${sprawa.numer}**. Sędzia nie zmienia się do końca sprawy.`));
 }
 
 // Awaryjna zmiana sędziego - wyłącznie właściciel serwera (komenda /sprawa-sedzia)
@@ -264,8 +266,8 @@ async function onDowodModal(interaction) {
   }
   const tresc = interaction.fields.getTextInputValue('tresc').trim();
   q.wstawDowod.run(id, interaction.user.id, tresc, Date.now());
-  await aktualizujKarteSprawy(interaction.client, id);
   await interaction.reply({ ...karty.kartaSukces('Dowód dodany', 'Wpis został dołączony do sprawy.'), flags: EPHEMERAL_V2 });
+  await aktualizujKarteSprawy(interaction.client, id);
 }
 
 // ---- Wyrok (ostateczny - bez odwołań) ----------------------------------
@@ -328,6 +330,8 @@ async function onWyrokModal(interaction) {
     return interaction.reply({ ...karty.kartaBlad('Nie można wydać wyroku', 'Wyrok w tej sprawie już zapadł albo nie jesteś jej sędzią.'), flags: EPHEMERAL_V2 });
   }
 
+  // Zapis wyroku, role, logi i list gończy trwają dłużej niż 3 s, które Discord daje na odpowiedź
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const werdykt = interaction.fields.getTextInputValue('werdykt').trim();
   const kara = interaction.fields.getTextInputValue('kara').trim();
   const wystawList = (interaction.fields.getTextInputValue('list_gonczy') || '').trim().toLowerCase();
@@ -365,11 +369,8 @@ async function onWyrokModal(interaction) {
   }
 
   await aktualizujKarteSprawy(interaction.client, id);
-  await interaction.reply({
-    ...karty.kartaPytanieOPublikacje(id),
-    flags: EPHEMERAL_V2,
-    // Dopisek z infoList po karcie nie jest trywialny w v2, więc puszczamy go w followUp jeśli jest
-  });
+  // Dopisek z infoList po karcie nie jest trywialny w v2, więc puszczamy go w followUp jeśli jest
+  await interaction.editReply(karty.kartaPytanieOPublikacje(id));
   if (infoList) {
     await interaction.followUp({ ...karty.kartaInfo({ tytul: 'List gończy', opis: infoList.trim(), kolor: kolory.info }), flags: EPHEMERAL_V2 });
   }
@@ -391,6 +392,8 @@ async function onWyrokPublikuj(interaction) {
   if (q.ustawPubliczny.run(publicznie ? 1 : 0, Date.now(), id).changes === 0) {
     return interaction.update({ ...karty.kartaOstrzezenie('Decyzja już zapadła', 'O publikacji tego wyroku już zdecydowano — nie zostanie wysłany drugi raz.') });
   }
+  // Wysyłka na kanały i do logów trwa dłużej niż 3 s - potwierdzamy kliknięcie od razu
+  await interaction.deferUpdate();
 
   // Rozprawa publiczna -> kanał „wyroki sądowe”, niepubliczna -> kanał „sprawy-sąd”
   const spr = q.poId.get(id);
@@ -410,7 +413,7 @@ async function onWyrokPublikuj(interaction) {
   });
 
   await aktualizujKarteSprawy(interaction.client, id);
-  await interaction.update({
+  await interaction.editReply({
     ...karty.kartaSukces(publicznie ? 'Opublikowano' : 'Zapisano jako niepubliczny',
       (publicznie
         ? 'Wyrok trafił na kanał z wyrokami sądowymi — widoczny dla wszystkich — i został zapisany w logach sądu.'
