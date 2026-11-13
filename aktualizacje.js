@@ -50,4 +50,14 @@ module.exports = [
     ],
     opis: 'Komend używa sędzia sprawy, ranga sądu albo administracja. Na kanale sprawy numer jest zbędny; poza nim podaj numer sprawy (np. SNZ-2026-0012). Opublikowane karty wyroków — na #wyroki-sądowe, na kanale administracji i w logach sądu — aktualizują się same po każdej spłacie i dodatkowej karze.',
   },
+  {
+    id: '2026-11-13-sad-przyjmij-timeout',
+    data: '2026-11-13',
+    tytul: 'Poprawka przycisków sądu',
+    naprawiono: [
+      'Przycisk **Przyjmij** w sprawie sądowej czasem kończył się komunikatem „Ta interakcja nie powiodła się”, choć sprawa była przyjmowana',
+      'To samo mogło się zdarzyć przy wydawaniu wyroku, wyborze publikacji i dodawaniu dowodów',
+    ],
+    opis: 'Bot od razu potwierdza kliknięcie, a dopiero potem nadaje rolę Sędzia, ustawia dostęp do kanału, wysyła wyrok i zapisuje logi. Wynik pojawia się po chwili w tej samej wiadomości.',
+  },
 ];

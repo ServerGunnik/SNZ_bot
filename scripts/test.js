@@ -174,6 +174,7 @@ const karty = wymagaj('utils/karty.js');
   const gracz = { roles: { cache: new Map() }, permissions: { has: () => false } };
   const modale = [];
   const odpowiedzi = [];
+  const kolejnoscOdpowiedzi = [];
   const atrapa = (customId, member, extra = {}) => ({
     customId, member, client, guild,
     user: { id: member === staff ? 'STAFFER' : 'GRACZ', username: 'gracz', tag: 'gracz#0' },
@@ -186,8 +187,9 @@ const karty = wymagaj('utils/karty.js');
     reply: async (p) => { if (p.components) p.components.forEach(c => c.toJSON()); odpowiedzi.push(p); },
     followUp: async () => {},
     update: async (p) => { if (p.components) p.components.forEach(c => c.toJSON()); odpowiedzi.push(p); },
-    deferReply: async () => {},
-    editReply: async () => {},
+    deferReply: async () => { kolejnoscOdpowiedzi.push('defer'); },
+    deferUpdate: async () => { kolejnoscOdpowiedzi.push('defer'); },
+    editReply: async (p) => { if (p.components) p.components.forEach(c => c.toJSON()); odpowiedzi.push(p); kolejnoscOdpowiedzi.push('edit'); },
     ...extra,
   });
   const otwieraModal = async (customId, member = staff, extra = {}) => {
@@ -461,8 +463,10 @@ const karty = wymagaj('utils/karty.js');
   db.prepare("INSERT INTO sprawy (id, numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, utworzona, status) VALUES (2, 'SNZ-2026-0002', 'KROL2', 'panstwo', 'Polska', 'z', 'o', 0, 'zlozona')").run();
   await bezpiecznie('przyjęcie z konfliktem', () => znajdz('sad:przyjmij:2')(atrapa('sad:przyjmij:2', staff, { user: { id: 'SEDZIA_PL' } })));
   sprawdz(!db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id, 'sędzia z konfliktem nie przyjął sprawy');
+  kolejnoscOdpowiedzi.length = 0;
   await bezpiecznie('przyjęcie', () => znajdz('sad:przyjmij:2')(atrapa('sad:przyjmij:2', staff, { user: { id: 'SEDZIA_OK' } })));
   sprawdz(db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id === 'SEDZIA_OK', 'neutralny sędzia przyjął sprawę');
+  sprawdz(kolejnoscOdpowiedzi.join(',') === 'defer,edit', '„Przyjmij” potwierdza kliknięcie od razu (bez limitu 3 s Discorda)');
   await bezpiecznie('ponowne przyjęcie', () => znajdz('sad:przyjmij:2')(atrapa('sad:przyjmij:2', staff, { user: { id: 'INNY_SEDZIA' } })));
   sprawdz(db.prepare('SELECT sedzia_id FROM sprawy WHERE id = 2').get().sedzia_id === 'SEDZIA_OK', 'sędzia się nie zmienia');
   const kartaSprawy = JSON.stringify(karty.kartaSprawy({ sprawa: { ...db.prepare('SELECT * FROM sprawy WHERE id = 2').get(), status: 'wyrok', werdykt: 'w', kara: 'k' } }).components[0].toJSON());
