@@ -115,10 +115,16 @@ const karty = wymagaj('utils/karty.js');
   sekcja('Ankiety');
   {
     const ankiety = wymagaj('modules/ankiety.js');
-    // Discord odrzuca przycisk z emoji, które nie jest prawdziwym emoji (np. 🅲) - cała ankieta się wtedy nie wysyła
-    const emojiOk = (e) => /^\p{Extended_Pictographic}️?$/u.test(e) || /^\p{Regional_Indicator}$/u.test(e);
-    sprawdz(ankiety.LITERY.length >= 10, 'ankiety: oznaczenia dla 10 opcji');
-    for (const l of ankiety.LITERY) sprawdz(emojiOk(l), `ankiety: „${l}” musi być prawdziwym emoji (inaczej Discord odrzuca przycisk)`);
+    // Przyciski to sam tekst odpowiedzi - emoji typu 🅲 Discord odrzucał i cała ankieta się nie wysyłała
+    const bazaAnkiet = wymagaj('database/db.js');
+    const opcjeAnkiety = ['Tak', 'Nie', 'Nie wiem', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    const idAnkiety = bazaAnkiet.prepare('INSERT INTO ankiety (pytanie, opcje, wiele, kanal_id, autor_id, utworzono, konczy) VALUES (?, ?, 0, ?, ?, ?, ?)')
+      .run('Test?', JSON.stringify(opcjeAnkiety), 'K', 'U', Date.now(), Date.now() + 60000).lastInsertRowid;
+    const kartaAnk = ankiety.kartaAnkiety(bazaAnkiet.prepare('SELECT * FROM ankiety WHERE id = ?').get(idAnkiety)).components[0].toJSON();
+    const przyciskiAnk = kartaAnk.components.filter(c => c.type === 1).flatMap(r => r.components);
+    sprawdz(przyciskiAnk.length === 10, `ankiety: przycisk dla każdej z 10 opcji (jest ${przyciskiAnk.length})`);
+    sprawdz(przyciskiAnk.every(b => !b.emoji), 'ankiety: przyciski bez emoji (Discord odrzucał nieprawidłowe emoji)');
+    sprawdz(przyciskiAnk.map(b => b.label).join('|') === opcjeAnkiety.join('|'), 'ankiety: przyciski mają tekst odpowiedzi');
     const zrodlo = fs.readFileSync(path.join(KORZEN, 'commands', 'ankieta.js'), 'utf8');
     sprawdz(zrodlo.includes('allowMultiselect') && !/allow_multiselect\s*:/.test(zrodlo),
       'ankieta natywna: wielokrotny wybór przez allowMultiselect (discord.js ignoruje allow_multiselect)');

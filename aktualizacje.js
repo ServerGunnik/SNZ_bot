@@ -143,6 +143,6 @@ module.exports = [
       'Anonimowe ankiety z 3 lub więcej odpowiedziami w ogóle się nie wysyłały (Discord odrzucał oznaczenia opcji C–J)',
       'Zwykłe ankiety z opcją `wiele:true` pozwalały wybrać tylko jedną odpowiedź',
     ],
-    opis: 'Opcje anonimowych ankiet są teraz oznaczone literami 🇦–🇯. Komenda się nie zmieniła — wystarczy wystawić ankietę jeszcze raz.',
+    opis: 'Przyciski anonimowych ankiet pokazują teraz sam tekst odpowiedzi, bez liter-emoji. Komenda się nie zmieniła — odpowiedzi wpisujesz jak dotąd, np. `Tak|Nie|Nie wiem`.',
   },
 ];
