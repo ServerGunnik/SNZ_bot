@@ -112,6 +112,19 @@ const karty = wymagaj('utils/karty.js');
   }
 
   // ---------------------------------------------------------------------
+  sekcja('Ankiety');
+  {
+    const ankiety = wymagaj('modules/ankiety.js');
+    // Discord odrzuca przycisk z emoji, które nie jest prawdziwym emoji (np. 🅲) - cała ankieta się wtedy nie wysyła
+    const emojiOk = (e) => /^\p{Extended_Pictographic}️?$/u.test(e) || /^\p{Regional_Indicator}$/u.test(e);
+    sprawdz(ankiety.LITERY.length >= 10, 'ankiety: oznaczenia dla 10 opcji');
+    for (const l of ankiety.LITERY) sprawdz(emojiOk(l), `ankiety: „${l}” musi być prawdziwym emoji (inaczej Discord odrzuca przycisk)`);
+    const zrodlo = fs.readFileSync(path.join(KORZEN, 'commands', 'ankieta.js'), 'utf8');
+    sprawdz(zrodlo.includes('allowMultiselect') && !/allow_multiselect\s*:/.test(zrodlo),
+      'ankieta natywna: wielokrotny wybór przez allowMultiselect (discord.js ignoruje allow_multiselect)');
+  }
+
+  // ---------------------------------------------------------------------
   sekcja('Karty (Components V2)');
   const kartyDoSprawdzenia = {
     panelTicketow: () => karty.panelTicketow(kategorie),
@@ -245,6 +258,182 @@ const karty = wymagaj('utils/karty.js');
     sprawdz(db.prepare('SELECT przydzielony FROM tickety WHERE id = ?').get(skarga.id).przydzielony === 'SEDZIA_SADU', 'ranga sądu może przejąć skargę');
     config.role.adminSadu = adminSaduPrzed;
     db.prepare("UPDATE tickety SET status = 'zamkniety' WHERE id = ?").run(skarga.id);
+  });
+
+  // ---------------------------------------------------------------------
+  sekcja('Ticket: dwa kanały — dla gracza i narada staffu');
+  await bezpiecznie('ticket tworzy kanał gracza i kanał narady', async () => {
+    const { PermissionFlagsBits } = require('discord.js');
+    // Role istnieją na serwerze (narada pomija ID ról, których nie ma w guild.roles.cache)
+    for (const id of ['STAFF', 'SAD']) guild.roles.cache.set(id, { id, position: 1 });
+    const adminSaduPrzed = config.role.adminSadu;
+    config.role.adminSadu = ['SAD'];
+    const tworzenie = guild.channels.create;
+    const utworzone = [];
+    guild.channels.create = async (o) => { const k = await tworzenie(o); utworzone.push({ opcje: o, kanal: k }); return k; };
+    const logiPrzed = logi.length;
+    const katSkargi = kategorie.find(k => k.value === 'skargi');
+    const dane = Object.fromEntries(katSkargi.pola.map(p => [p.id, p.nick ? 'Steve' : 'x'.repeat(Math.max(p.min || 1, 25))]));
+    const graczDwaKanaly = { id: 'GRACZ_2K', roles: { cache: new Map() }, permissions: { has: () => false } };
+    try {
+      await znajdz('ticket:formularz:skargi')(atrapa('ticket:formularz:skargi', graczDwaKanaly, {
+        user: { id: 'GRACZ_2K', username: 'Gracz2K', tag: 'Gracz2K#0' },
+        fields: { getTextInputValue: (id) => dane[id] || '' },
+      }));
+    } finally {
+      guild.channels.create = tworzenie;
+      config.role.adminSadu = adminSaduPrzed;
+    }
+
+    const t = db.prepare("SELECT * FROM tickety WHERE user_id = 'GRACZ_2K'").get();
+    sprawdz(t && t.status === 'otwarty', 'dwa kanały: ticket zapisany w bazie');
+    sprawdz(utworzone.length === 2, `dwa kanały: utworzono dokładnie 2 kanały (jest ${utworzone.length})`);
+    const [ticketK, naradaK] = utworzone;
+    if (!t || !ticketK || !naradaK) return;
+
+    const ow = (wpis, id) => wpis.opcje.permissionOverwrites.find(o => o.id === id);
+    const widzi = (wpis, id) => !!ow(wpis, id)?.allow?.includes(PermissionFlagsBits.ViewChannel);
+    const ukryty = (wpis, id) => !!ow(wpis, id)?.deny?.includes(PermissionFlagsBits.ViewChannel);
+
+    // Kanał gracza
+    sprawdz(t.kanal_id === ticketK.kanal.id, 'kanał gracza: zapisany jako kanał ticketu');
+    sprawdz(ukryty(ticketK, guild.id), 'kanał gracza: ukryty dla @everyone');
+    sprawdz(widzi(ticketK, 'GRACZ_2K'), 'kanał gracza: widzi go autor ticketu');
+    sprawdz(widzi(ticketK, 'STAFF'), 'kanał gracza: widzi go staff');
+    sprawdz(widzi(ticketK, 'SAD'), 'kanał gracza: widzi go ranga sądu (skargi)');
+    sprawdz(ticketK.kanal.wyslane.length >= 2, 'kanał gracza: ping i karta ticketu wysłane');
+
+    // Kanał narady staffu
+    sprawdz(t.narada_id === naradaK.kanal.id, 'narada: zapisana przy tickecie (narada_id)');
+    sprawdz(t.narada_id !== t.kanal_id, 'narada: to inny kanał niż kanał gracza');
+    sprawdz(naradaK.opcje.name === `sprawa-gracz2k-${t.id}-administracja`, `narada: nazwa sprawa-<nick>-<id>-administracja (jest ${naradaK.opcje.name})`);
+    sprawdz(ukryty(naradaK, guild.id), 'narada: ukryta dla @everyone');
+    sprawdz(!ow(naradaK, 'GRACZ_2K'), 'narada: autor ticketu NIE ma dostępu');
+    sprawdz(widzi(naradaK, 'STAFF'), 'narada: widzi ją staff');
+    sprawdz(widzi(naradaK, 'SAD'), 'narada: widzi ją ranga sądu (skargi)');
+    sprawdz(widzi(naradaK, 'TECHNIK'), 'narada: widzi ją technik');
+    sprawdz(widzi(naradaK, 'BOT'), 'narada: bot ma dostęp');
+    const kartaNarady = JSON.stringify(naradaK.kanal.wyslane[0] || {});
+    sprawdz(kartaNarady.includes('Narada administracji') && kartaNarady.includes(`<#${t.kanal_id}>`), 'narada: karta z formularzem i linkiem do kanału gracza');
+
+    // Log otwarcia wskazuje oba kanały i nie zgłasza problemu
+    const noweLogi = logi.slice(logiPrzed).map((t, i) => `${t}\n${logiOpisy[logiPrzed + i]}`).join('\n');
+    sprawdz(noweLogi.includes(`<#${t.narada_id}>`), 'log otwarcia: zawiera link do narady');
+    sprawdz(!noweLogi.includes('Nie utworzono narady') && !noweLogi.includes('utworzona z problemami'), 'log otwarcia: bez błędów narady');
+    db.prepare("UPDATE tickety SET status = 'zamkniety' WHERE id = ?").run(t.id);
+  });
+
+  await bezpiecznie('ta sama rola w ROLA_STAFF i ROLA_HELPER', async () => {
+    // Discord odrzuca wiadomość z powtórzoną rolą w allowed_mentions (SET_TYPE_ALREADY_CONTAINS_VALUE)
+    const helperPrzed = config.role.helper;
+    config.role.helper = ['STAFF', 'HELPER_X'];
+    const tworzenie = guild.channels.create;
+    const utworzone = [];
+    guild.channels.create = async (o) => {
+      const k = await tworzenie(o);
+      const wyslij = k.send;
+      k.send = async (p) => {
+        const role = p.allowedMentions?.roles || [];
+        if (new Set(role).size !== role.length) throw new Error('allowed_mentions.roles[SET_TYPE_ALREADY_CONTAINS_VALUE]');
+        return wyslij(p);
+      };
+      utworzone.push({ opcje: o, kanal: k });
+      return k;
+    };
+    const kat = kategorie[0];
+    const dane = Object.fromEntries(kat.pola.map(p => [p.id, p.nick ? 'Steve' : 'x'.repeat(Math.max(p.min || 1, 12))]));
+    const g = { id: 'GRACZ_DUP', roles: { cache: new Map() }, permissions: { has: () => false } };
+    try {
+      await znajdz(`ticket:formularz:${kat.value}`)(atrapa(`ticket:formularz:${kat.value}`, g, {
+        user: { id: 'GRACZ_DUP', username: 'graczdup', tag: 'graczdup#0' },
+        fields: { getTextInputValue: (id) => dane[id] || '' },
+      }));
+    } finally {
+      guild.channels.create = tworzenie;
+      config.role.helper = helperPrzed;
+    }
+    const t = db.prepare("SELECT * FROM tickety WHERE user_id = 'GRACZ_DUP'").get();
+    const kanalT = utworzone[0]?.kanal;
+    const ping = kanalT?.wyslane[0];
+    sprawdz(ping && new Set(ping.allowedMentions.roles).size === ping.allowedMentions.roles.length, 'duplikat roli: ping bez powtórzonych ról');
+    sprawdz(ping && (ping.content.match(/<@&STAFF>/g) || []).length === 1, 'duplikat roli: rola pingowana raz');
+    const idOw = utworzone[0]?.opcje.permissionOverwrites.map(o => o.id) || [];
+    sprawdz(new Set(idOw).size === idOw.length, 'duplikat roli: kanał bez powtórzonych uprawnień');
+    sprawdz(t?.narada_id && kanalT?.wyslane.length >= 2, 'duplikat roli: ticket powstał w całości (karta + narada)');
+    if (t) db.prepare("UPDATE tickety SET status = 'zamkniety' WHERE id = ?").run(t.id);
+  });
+
+  await bezpiecznie('nieudany ping nie przerywa zakładania ticketu', async () => {
+    const tworzenie = guild.channels.create;
+    let pierwszy = true;
+    guild.channels.create = async (o) => {
+      const k = await tworzenie(o);
+      if (pierwszy) {
+        pierwszy = false;
+        const wyslij = k.send;
+        k.send = async (p) => { if (p.content) throw new Error('Invalid Form Body'); return wyslij(p); };
+      }
+      return k;
+    };
+    const kat = kategorie[0];
+    const dane = Object.fromEntries(kat.pola.map(p => [p.id, p.nick ? 'Steve' : 'x'.repeat(Math.max(p.min || 1, 12))]));
+    const g = { id: 'GRACZ_PING', roles: { cache: new Map() }, permissions: { has: () => false } };
+    try {
+      await znajdz(`ticket:formularz:${kat.value}`)(atrapa(`ticket:formularz:${kat.value}`, g, {
+        user: { id: 'GRACZ_PING', username: 'graczping', tag: 'graczping#0' },
+        fields: { getTextInputValue: (id) => dane[id] || '' },
+      }));
+    } finally {
+      guild.channels.create = tworzenie;
+    }
+    const t = db.prepare("SELECT * FROM tickety WHERE user_id = 'GRACZ_PING'").get();
+    sprawdz(t?.wiadomosc_id && t?.narada_id, 'błąd pingu: karta ticketu i narada i tak powstały');
+    if (t) db.prepare("UPDATE tickety SET status = 'zamkniety' WHERE id = ?").run(t.id);
+  });
+
+  // config.js: to samo ID dwa razy w jednej zmiennej ROLA_* liczy się raz
+  await bezpiecznie('lista ról bez powtórzeń', async () => {
+    const przed = process.env.ROLA_HELPER;
+    process.env.ROLA_HELPER = '111, 222,111';
+    delete require.cache[require.resolve(path.join(KORZEN, 'config.js'))];
+    const swiezy = require(path.join(KORZEN, 'config.js'));
+    sprawdz(JSON.stringify(swiezy.role.helper) === '["111","222"]', 'config: powtórzone ID roli usunięte');
+    if (przed === undefined) delete process.env.ROLA_HELPER; else process.env.ROLA_HELPER = przed;
+    delete require.cache[require.resolve(path.join(KORZEN, 'config.js'))];
+    require.cache[require.resolve(path.join(KORZEN, 'config.js'))] = { id: 'x', filename: 'x', loaded: true, exports: config };
+  });
+
+  await bezpiecznie('narada powstaje mimo błędu kategorii', async () => {
+    // Discord odrzuca kanał w kategorii (np. 50 kanałów) - narada ma powstać bez kategorii, a log podać powód
+    const kategoriaPrzed = config.kanaly.kategoriaNarady;
+    kanaly.set('KAT_NARADY', { id: 'KAT_NARADY', type: ChannelType.GuildCategory, name: 'Narady', children: { cache: new Collection() } });
+    config.kanaly.kategoriaNarady = 'KAT_NARADY';
+    const tworzenie = guild.channels.create;
+    guild.channels.create = async (o) => {
+      if (o.parent === 'KAT_NARADY') throw new Error('Maximum number of channels in category reached (50)');
+      return tworzenie(o);
+    };
+    const logiPrzed = logi.length;
+    const kat = kategorie[0];
+    const dane = Object.fromEntries(kat.pola.map(p => [p.id, p.nick ? 'Steve' : 'x'.repeat(Math.max(p.min || 1, 12))]));
+    const g = { id: 'GRACZ_KAT', roles: { cache: new Map() }, permissions: { has: () => false } };
+    try {
+      await znajdz(`ticket:formularz:${kat.value}`)(atrapa(`ticket:formularz:${kat.value}`, g, {
+        user: { id: 'GRACZ_KAT', username: 'graczkat', tag: 'graczkat#0' },
+        fields: { getTextInputValue: (id) => dane[id] || '' },
+      }));
+    } finally {
+      guild.channels.create = tworzenie;
+      config.kanaly.kategoriaNarady = kategoriaPrzed;
+      kanaly.delete('KAT_NARADY');
+    }
+    const t = db.prepare("SELECT * FROM tickety WHERE user_id = 'GRACZ_KAT'").get();
+    const narada = t?.narada_id && kanaly.get(t.narada_id);
+    sprawdz(narada, 'błąd kategorii: narada i tak utworzona');
+    sprawdz(narada && narada.parentId === null, 'błąd kategorii: narada bez kategorii');
+    const noweLogi = logi.slice(logiPrzed).map((t, i) => `${t}\n${logiOpisy[logiPrzed + i]}`).join('\n');
+    sprawdz(noweLogi.includes('Maximum number of channels'), 'błąd kategorii: przyczyna trafia do logów');
+    if (t) db.prepare("UPDATE tickety SET status = 'zamkniety' WHERE id = ?").run(t.id);
   });
 
   // ---------------------------------------------------------------------
@@ -591,11 +780,33 @@ const karty = wymagaj('utils/karty.js');
   await sad.dodajKare(client, sprawa50(), 'WIDZ', '5 diamentów', 'przeszkadzał', 'SEDZIA_OK');
   sprawdz(kanalSprawy.wyslane.some(p => JSON.stringify(p.components.map(c => c.toJSON())).includes('Dodatkowa kara')), 'dodatkowa kara ogłoszona na kanale sprawy');
   sprawdz(db.prepare("SELECT 1 FROM ostrzezenia WHERE user_id = 'WIDZ' AND sprawa_id = 50").get(), 'dodatkowa kara w historii ostrzeżeń');
+  await sad.dodajKare(client, sprawa50(), 'SWIADEK', '2 diamenty', 'spóźnienie', 'SEDZIA_OK', { doWarnow: false });
+  sprawdz(!db.prepare("SELECT 1 FROM ostrzezenia WHERE user_id = 'SWIADEK'").get(), 'kara z do-warnow: nie — brak wpisu w ostrzeżeniach');
+  sprawdz(db.prepare("SELECT 1 FROM sprawy_kary WHERE user_id = 'SWIADEK' AND sprawa_id = 50").get(), 'kara z do-warnow: nie — nadal zapisana przy sprawie');
+  const komendaKary = require(path.join(KORZEN, 'commands/sprawa-dodaj-kare.js')).data.toJSON();
+  const opcjaWarnow = (komendaKary.options || []).find(o => o.name === 'do-warnow');
+  sprawdz(opcjaWarnow && opcjaWarnow.required === true, '/sprawa-dodaj-kare: opcja do-warnow jest obowiązkowa');
+  db.prepare("DELETE FROM sprawy_kary WHERE user_id = 'SWIADEK'").run(); // nie wpływa na dalsze testy spłat
   const s1 = await sad.oznaczSplate(client, sprawa50(), 'P1', 'SEDZIA_OK');
   sprawdz(s1.stan && !s1.stan.splacona && s1.pozostali.length === 2, 'po spłacie jednej strony sprawa nie jest spłacona');
   await sad.oznaczSplate(client, sprawa50(), 'P2', 'SEDZIA_OK');
   const s3 = await sad.oznaczSplate(client, sprawa50(), 'WIDZ', 'SEDZIA_OK');
   sprawdz(s3.stan?.splacona, 'sprawa spłacona dopiero, gdy wszyscy wykonali kary');
+  // Numery kar (#K) i spłat (#S), jak #id przy ostrzeżeniach
+  const karyWyroku50 = db.prepare("SELECT * FROM sprawy_kary WHERE sprawa_id = 50 AND typ = 'wyrok' ORDER BY id").all();
+  sprawdz(karyWyroku50.length === 2 && karyWyroku50.every(k => k.kara === '10 diamentów'), 'ID kar: kara z wyroku ma własny wiersz dla każdej strony');
+  const zobow = Object.fromEntries(s3.stan.zobowiazani.map(z => [z.userId, z]));
+  sprawdz(zobow.P1?.karyId.length === 1 && zobow.P2?.karyId.length === 1, 'ID kar: strony wyroku mają numer kary');
+  const karaWidza = db.prepare("SELECT * FROM sprawy_kary WHERE user_id = 'WIDZ'").get();
+  sprawdz(zobow.WIDZ?.karyId.includes(karaWidza.id) && karaWidza.typ === 'dodatkowa', 'ID kar: dodatkowa kara ma numer');
+  sprawdz(db.prepare("SELECT powod FROM ostrzezenia WHERE user_id = 'WIDZ'").get().powod.includes(`#K${karaWidza.id}`), 'ID kar: numer kary w ostrzeżeniu');
+  sprawdz(s1.splataId && s3.splataId && s3.splataId > s1.splataId, 'ID spłat: każda spłata dostaje kolejny numer');
+  sprawdz(new Set(s3.stan.zobowiazani.map(z => z.splata.id)).size === 3, 'ID spłat: numery spłat są unikalne');
+  const kartaZId = JSON.stringify(karty.kartaWyroku({ sprawa: sprawa50(), wykonanie: s3.stan }).components[0].toJSON());
+  sprawdz(kartaZId.includes(`#K${karaWidza.id}`) && kartaZId.includes(`#S${s3.splataId}`), 'ID: karta wyroku pokazuje numery kar i spłat');
+  sprawdz(logiOpisy.some(o => o?.includes(`#S${s3.splataId}`)), 'ID spłat: numer spłaty w logach sądu');
+  sad.stanWykonania(sprawa50());
+  sprawdz(db.prepare("SELECT COUNT(*) c FROM sprawy_kary WHERE sprawa_id = 50 AND typ = 'wyrok'").get().c === 2, 'ID kar: ponowny odczyt nie dubluje kar z wyroku');
   sprawdz((await sad.oznaczSplate(client, sprawa50(), 'P1', 'SEDZIA_OK')).blad?.includes('już spłacił'), 'nie da się oznaczyć spłaty dwa razy');
   const ostatniaKarta = edytowaneWyroki.filter(e => e.kanal === 'WYR').at(-1)?.tekst || '';
   sprawdz(ostatniaKarta.includes('sprawa spłacona') && ostatniaKarta.includes('<@P2>') && ostatniaKarta.includes('<@SEDZIA_OK>'), 'karta na #wyroki-sądowe pokazuje, kto spłacił');
@@ -611,6 +822,79 @@ const karty = wymagaj('utils/karty.js');
   sprawdz(odpKomend[0]?.includes('Brak uprawnień'), 'zwykły gracz nie oznaczy spłaty');
   config.kanaly.logiSad = logiSadPrzed;
   db.prepare('DELETE FROM sprawy WHERE id = 50').run();
+
+  // ---------------------------------------------------------------------
+  sekcja('Historia spraw sądowych (/historia-spraw)');
+  await bezpiecznie('historia spraw', async () => {
+    const hist = wymagaj('modules/historia-spraw.js');
+    const wstaw = db.prepare(`INSERT INTO sprawy (id, numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, utworzona,
+      sedzia_id, status, werdykt, kara, wyrok_wobec, wyrok_data, wyrok_publiczny, zamknieta) VALUES (?, ?, ?, 'gracz', ?, ?, 'opis', ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    // 901: H_POZ pozwany, wyrok, niepubliczna, zamknięta | 902: H_POZ pozywający, w toku
+    wstaw.run(901, 'SNZ-2026-0901', 'H_POW', 'H_POZ', 'Kradzież', 1000, 'H_SED', 'zamknieta', 'winny', '5 diamentów', 'pozwany', 2000, 0, 3000);
+    wstaw.run(902, 'SNZ-2026-0902', 'H_POZ', 'H_INNY', 'Obraza', 1100, 'H_SED', 'w_toku', null, null, null, null, 0, null);
+    // 903: niepubliczna bez udziału H_POZ | 904: publiczna bez udziału H_POZ
+    wstaw.run(903, 'SNZ-2026-0903', 'H_A', 'H_B', 'Prywatna', 1200, 'H_SED', 'wyrok', 'winny', '1 diament', 'pozwany', 2100, 0, null);
+    wstaw.run(904, 'SNZ-2026-0904', 'H_C', 'H_D', 'Publiczna', 1300, 'H_SED2', 'wyrok', 'winny', '2 diamenty', 'pozwany', 2200, 1, null);
+    for (let i = 905; i <= 908; i++) wstaw.run(i, `SNZ-2026-0${i}`, 'H_E', 'H_F', `Sprawa ${i}`, 1400 + i, 'H_SED', 'zlozona', null, null, null, null, 0, null);
+    db.prepare("INSERT INTO sprawy_splaty (sprawa_id, user_id, oznaczyl, data, id) VALUES (901, 'H_POZ', 'H_SED', 2500, 900)").run();
+
+    const tekstKarty = (k) => JSON.stringify(k.components[0].toJSON());
+    const czlonekStaff = { id: 'H_STAFF', roles: { cache: new Map([['STAFF', 1]]) } };
+    const czlonekGracz = { id: 'H_POZ', roles: { cache: new Map() } };
+
+    // Administracja: filtr gracza obejmuje wszystkie jego role
+    const kartaGracza = tekstKarty(hist.widokHistorii(czlonekStaff, { gracz: 'H_POZ', guildId: 'G' }));
+    sprawdz(kartaGracza.includes('SNZ-2026-0901') && kartaGracza.includes('SNZ-2026-0902') && !kartaGracza.includes('SNZ-2026-0903'), 'historia: filtr gracza pokazuje jego sprawy');
+    sprawdz(kartaGracza.includes('razem: 2'), 'historia: licznik spraw gracza');
+    sprawdz(kartaGracza.includes('_pozwany_') && kartaGracza.includes('_pozywający_'), 'historia: rola gracza przy każdej sprawie');
+    sprawdz(kartaGracza.includes('**Kary:** 1') && kartaGracza.includes('spłacone: 1'), 'historia: podsumowanie kar i spłat gracza');
+    sprawdz(kartaGracza.includes('✅ spłacona'), 'historia: stan spłaty wyroku na liście');
+
+    // Filtr sędziego + stronicowanie (5 na stronę)
+    const kartaSedziego = tekstKarty(hist.widokHistorii(czlonekStaff, { sedzia: 'H_SED', guildId: 'G' }));
+    sprawdz(kartaSedziego.includes('razem: 7') && kartaSedziego.includes('strona 1 z 2'), 'historia: filtr sędziego i stronicowanie');
+    sprawdz(kartaSedziego.includes('hspr:str:-:H_SED:wszystkie:2'), 'historia: przycisk następnej strony zachowuje filtry');
+    const zakonczone = tekstKarty(hist.widokHistorii(czlonekStaff, { sedzia: 'H_SED', status: 'zakonczone', guildId: 'G' }));
+    sprawdz(zakonczone.includes('razem: 2'), 'historia: filtr statusu „zakończone”');
+
+    // Zwykły gracz widzi tylko swoje sprawy
+    const kartaWlasna = tekstKarty(hist.widokHistorii(czlonekGracz, { gracz: 'H_A', sedzia: 'H_SED', guildId: 'G' }));
+    sprawdz(kartaWlasna.includes('razem: 2') && !kartaWlasna.includes('SNZ-2026-0903'), 'historia: gracz bez uprawnień widzi tylko swoje sprawy');
+    sprawdz(kartaWlasna.includes('tylko sprawy, w których'), 'historia: gracz widzi informację o ograniczeniu');
+    sprawdz(hist.widokSzczegolow(czlonekGracz, hist.q.poId.get(903), { guildId: 'G' }).blad, 'historia: gracz nie zobaczy cudzej niepublicznej sprawy');
+    sprawdz(!hist.widokSzczegolow(czlonekGracz, hist.q.poId.get(904), { guildId: 'G' }).blad, 'historia: gracz zobaczy publiczny wyrok');
+
+    // Szczegóły: numery kar i spłat
+    const szcz = tekstKarty(hist.widokSzczegolow(czlonekStaff, hist.q.poId.get(901), { guildId: 'G' }));
+    sprawdz(szcz.includes('Sprawa SNZ-2026-0901') && szcz.includes('#K') && szcz.includes('#S900') && szcz.includes('Zamknięta'), 'historia: szczegóły z karami #K, spłatą #S i datami');
+
+    // Przyciski i select (komponenty)
+    const zaktualizowane = [];
+    const komponent = (customId, values = []) => ({
+      customId, values, member: czlonekStaff, guild: { id: 'G' },
+      update: async (p) => zaktualizowane.push(tekstKarty(p)),
+      reply: async (p) => zaktualizowane.push(`REPLY ${tekstKarty(p)}`),
+    });
+    await znajdz('hspr:str')(komponent('hspr:str:-:H_SED:wszystkie:2'));
+    sprawdz(zaktualizowane.at(-1)?.includes('strona 2 z 2'), 'historia: przycisk zmienia stronę');
+    await znajdz('hspr:szcz')(komponent('hspr:szcz:-:H_SED:wszystkie:2', ['901']));
+    sprawdz(zaktualizowane.at(-1)?.includes('Sprawa SNZ-2026-0901') && zaktualizowane.at(-1).includes('hspr:str:-:H_SED:wszystkie:2'), 'historia: wybór sprawy pokazuje szczegóły z powrotem do listy');
+
+    // Komenda: numer i blokada cudzej historii dla gracza
+    const komenda = wymagaj('commands/historia-spraw.js');
+    const odp = [];
+    const opcje = (o) => ({ getString: (n) => o[n] ?? null, getUser: (n) => (o[n] ? { id: o[n] } : null) });
+    await komenda.execute({ member: czlonekStaff, user: { id: 'H_STAFF' }, guild: { id: 'G' }, options: opcje({ numer: 'snz-2026-0904' }), reply: async (p) => odp.push(tekstKarty(p)) });
+    sprawdz(odp.at(-1)?.includes('Sprawa SNZ-2026-0904'), '/historia-spraw numer: szczegóły sprawy (bez względu na wielkość liter)');
+    await komenda.execute({ member: czlonekGracz, user: { id: 'H_POZ' }, guild: { id: 'G' }, options: opcje({ gracz: 'H_A' }), reply: async (p) => odp.push(tekstKarty(p)) });
+    sprawdz(odp.at(-1)?.includes('Brak uprawnień'), '/historia-spraw: gracz nie przegląda cudzej historii');
+    const json = komenda.data.toJSON();
+    sprawdz(json.name === 'historia-spraw' && json.options.every(o => !o.required), '/historia-spraw: wszystkie opcje opcjonalne');
+
+    db.prepare('DELETE FROM sprawy WHERE id BETWEEN 901 AND 908').run();
+    db.prepare('DELETE FROM sprawy_splaty WHERE sprawa_id BETWEEN 901 AND 908').run();
+    db.prepare('DELETE FROM sprawy_kary WHERE sprawa_id BETWEEN 901 AND 908').run();
+  });
 
   // ---------------------------------------------------------------------
   sekcja('List gończy: zgłoszenie zatrzymania z dowodem');

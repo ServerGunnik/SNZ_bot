@@ -4,6 +4,17 @@ const { jestStaff } = require('../utils/uprawnienia.js');
 const { log } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
 const rekrutacja = require('../modules/rekrutacja.js');
+const config = require('../config.js');
+
+async function wystawPanel(interaction) {
+  if (!config.rekrutacja.kanalPodan) {
+    return interaction.editReply(karty.kartaBlad('Brak kanału podań', 'Ustaw `KANAL_PODANIA` (albo `KANAL_LOGI`) w `.env` — tam będą trafiać podania.'));
+  }
+  const ok = await interaction.channel.send(karty.panelRekrutacji()).then(() => true).catch(() => false);
+  if (!ok) return interaction.editReply(karty.kartaBlad('Nie udało się wystawić panelu', 'Bot nie może pisać na tym kanale.'));
+  return interaction.editReply(karty.kartaSukces('Panel rekrutacji wystawiony',
+    `Kandydaci klikają **Złóż podanie** i wypełniają formularz. Podania trafiają na <#${config.rekrutacja.kanalPodan}> z przyciskami Przyjmij / Odrzuć.`));
+}
 
 async function stworzKanaly(interaction) {
   const wynik = await rekrutacja.stworz(interaction.guild, interaction.user.id);
@@ -64,7 +75,8 @@ module.exports = {
     .addSubcommand(s => s.setName('stworz').setNameLocalizations({ pl: 'stwórz' })
       .setDescription('Utwórz poczekalnię i kanał rekrutacji'))
     .addSubcommand(s => s.setName('usun').setNameLocalizations({ pl: 'usuń' })
-      .setDescription('Usuń kanały rekrutacyjne (zakończ sesję)')),
+      .setDescription('Usuń kanały rekrutacyjne (zakończ sesję)'))
+    .addSubcommand(s => s.setName('panel').setDescription('Wystaw w tym kanale panel z formularzem rekrutacyjnym')),
 
   async execute(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -76,5 +88,6 @@ module.exports = {
     const sub = interaction.options.getSubcommand();
     if (sub === 'stworz') return stworzKanaly(interaction);
     if (sub === 'usun') return usunKanaly(interaction);
+    if (sub === 'panel') return wystawPanel(interaction);
   },
 };

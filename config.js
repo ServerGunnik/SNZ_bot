@@ -1,7 +1,8 @@
 require('dotenv').config();
 
 // ID z .env rozdzielane przecinkami (np. ROLA_STAFF=111,222,333) → tablica
-const listaId = (v) => (v || '').split(',').map(s => s.trim()).filter(Boolean);
+// Bez powtórzeń - to samo ID wpisane dwa razy psułoby pingi (Discord odrzuca powtórzone role w allowed_mentions)
+const listaId = (v) => [...new Set((v || '').split(',').map(s => s.trim()).filter(Boolean))];
 
 module.exports = {
   token: process.env.BOT_TOKEN,
@@ -69,6 +70,19 @@ module.exports = {
     maxDlugoscNicka: 16,
     regexNicka: /^[a-zA-Z0-9_]{3,16}$/,
     zmienPseudonim: true,
+  },
+
+  // Formularz rekrutacyjny (/recru panel). Podania trafiają na KANAL_PODANIA (domyślnie KANAL_LOGI).
+  rekrutacja: {
+    kanalPodan: process.env.KANAL_PODANIA || process.env.KANAL_LOGI,
+    // Role nadawane po przyjęciu (puste = bot nie nadaje roli, tylko powiadamia kandydata)
+    rolaPrzyjety: listaId(process.env.ROLA_REKRUT),
+    // Role pingowane przy nowym podaniu (puste = bez pingu)
+    ping: listaId(process.env.ROLA_PING_PODANIA),
+    minWiek: 10,
+    maxWiek: 99,
+    // Po odrzuceniu kandydat może złożyć kolejne podanie dopiero po tylu godzinach
+    cooldownPoOdrzuceniuGodz: 24,
   },
 
   pozew: {
@@ -174,9 +188,14 @@ module.exports = {
   },
 
   ostrzezenia: {
+    // Progi aktywnych ostrzeżeń (0 = wyłączone)
     prog: {
-      mute: 3,
-      ban: 5,
+      // Rozprawa sądowa z urzędu (Prokurator może przejąć oskarżenie)
+      rozprawa: 3,
+      // Automatyczne wyciszenie - wyłączone, zamiast niego rozprawa
+      mute: 0,
+      // Automatyczny ban - wyłączony
+      ban: 0,
     },
     dlugoscMuteMs: 60 * 60 * 1000,
     // Po ilu dniach ostrzeżenie przestaje liczyć się do progów (0 = nigdy nie wygasa)

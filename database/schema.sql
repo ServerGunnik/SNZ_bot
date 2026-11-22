@@ -345,3 +345,22 @@ CREATE TABLE IF NOT EXISTS pozew_cooldown_reset (
   data INTEGER NOT NULL,
   przez TEXT NOT NULL
 );
+
+-- PODANIA REKRUTACYJNE: formularz z panelu /recru panel, rozpatrywane przez staff (Przyjmij/Odrzuć)
+CREATE TABLE IF NOT EXISTS podania (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  nick TEXT NOT NULL,
+  wiek INTEGER NOT NULL,
+  powod TEXT NOT NULL,
+  doswiadczenie TEXT,
+  aktywnosc TEXT,
+  status TEXT NOT NULL DEFAULT 'oczekuje',  -- oczekuje | przyjete | odrzucone
+  rozpatrzyl TEXT,
+  uzasadnienie TEXT,
+  kanal_id TEXT,
+  wiadomosc_id TEXT,
+  utworzono INTEGER NOT NULL,
+  rozpatrzono INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_podania_user ON podania(user_id, status);

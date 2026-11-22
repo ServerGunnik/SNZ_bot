@@ -25,8 +25,10 @@ const q = {
   liczbaGlosujacych: db.prepare('SELECT COUNT(DISTINCT user_id) as ile FROM ankiety_glosy WHERE ankieta_id = ?'),
 };
 
-// Oznaczenia opcji (A-J, max 10). Discord renderuje je jako kolorowe kwadratowe litery.
-const LITERY = ['🅰️', '🅱️', '🅲', '🅳', '🅴', '🅵', '🅶', '🅷', '🅸', '🅹'];
+// Oznaczenia opcji (A-J, max 10) - litery regionalne (:regional_indicator_a: itd.).
+// Muszą to być prawdziwe emoji: znaki typu 🅲-🅹 nie są emoji i Discord odrzuca przycisk
+// („Invalid emoji”), przez co ankieta z 3+ opcjami w ogóle się nie wysyłała.
+const LITERY = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭', '🇮', '🇯'];
 const DL_PASKA = 20;
 
 function pasek(procent) {
@@ -174,4 +176,4 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('ankieta:glos', onGlos);
 }
 
-module.exports = { rejestruj, utworzAnkiete, uruchomCyklZamykania, zamknijAnkiete, anonimowaPoWiadomosci };
+module.exports = { rejestruj, utworzAnkiete, uruchomCyklZamykania, zamknijAnkiete, anonimowaPoWiadomosci, kartaAnkiety, LITERY };

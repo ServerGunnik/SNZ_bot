@@ -6,14 +6,13 @@ const config = require('../config.js');
 const karty = require('../utils/karty.js');
 const { log, wyslij } = require('../utils/logger.js');
 const kolory = require('../utils/kolory.js');
-const { stanCooldownu, kategoriaSpraw } = require('../modules/sad.js');
+const { stanCooldownu, kategoriaSpraw, nastepnyNumer } = require('../modules/sad.js');
 
 const q = {
   utworz: db.prepare(`INSERT INTO sprawy
     (numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, dowody, utworzona)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   zapiszKanal: db.prepare('UPDATE sprawy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
-  ostatnia: db.prepare("SELECT numer FROM sprawy ORDER BY id DESC LIMIT 1"),
   panstwaPoNazwie: db.prepare('SELECT * FROM panstwa WHERE nazwa = ? COLLATE NOCASE'),
   wszystkiePanstwa: db.prepare('SELECT nazwa FROM panstwa ORDER BY nazwa COLLATE NOCASE'),
   panstwoLidera: db.prepare('SELECT * FROM panstwa WHERE lider_id = ?'),
@@ -38,16 +37,6 @@ function kartaCooldownu(member, userId) {
     `Kolejną możesz utworzyć <t:${t}:R> (<t:${t}:t>).`);
 }
 
-function nastepnyNumer() {
-  const rok = new Date().getFullYear();
-  const ostatnia = q.ostatnia.get();
-  let n = 1;
-  if (ostatnia?.numer) {
-    const m = ostatnia.numer.match(/^SNZ-(\d{4})-(\d+)$/);
-    if (m && parseInt(m[1], 10) === rok) n = parseInt(m[2], 10) + 1;
-  }
-  return `SNZ-${rok}-${String(n).padStart(4, '0')}`;
-}
 
 module.exports = {
   data: new SlashCommandBuilder()
