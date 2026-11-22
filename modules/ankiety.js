@@ -25,10 +25,9 @@ const q = {
   liczbaGlosujacych: db.prepare('SELECT COUNT(DISTINCT user_id) as ile FROM ankiety_glosy WHERE ankieta_id = ?'),
 };
 
-// Oznaczenia opcji (A-J, max 10) - litery regionalne (:regional_indicator_a: itd.).
-// Muszą to być prawdziwe emoji: znaki typu 🅲-🅹 nie są emoji i Discord odrzuca przycisk
-// („Invalid emoji”), przez co ankieta z 3+ opcjami w ogóle się nie wysyłała.
-const LITERY = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭', '🇮', '🇯'];
+// Przyciski i opcje to sam tekst odpowiedzi, bez emoji. Wcześniej przyciski miały litery 🅰️-🅹,
+// ale 🅲-🅹 to nie emoji - Discord odrzucał przycisk („Invalid emoji”) i ankieta z 3+ opcjami
+// w ogóle się nie wysyłała.
 const DL_PASKA = 20;
 
 function pasek(procent) {
@@ -59,7 +58,7 @@ function kartaAnkiety(ankieta, { zamknieta = false } = {}) {
     const procent = sumaGlosow ? Math.round((g / sumaGlosow) * 100) : 0;
     const prowadzi = zamknieta && g > 0 && g === maxGlosow;
     const nazwa = prowadzi ? `**${tekst}** 👑` : `**${tekst}**`;
-    return `${LITERY[i]} ${nazwa}\n${pasek(procent)}  \`${g}\` (${procent}%)`;
+    return `${nazwa}\n${pasek(procent)}  \`${g}\` (${procent}%)`;
   }).join('\n\n');
 
   const czas = Math.floor(ankieta.konczy / 1000);
@@ -80,11 +79,10 @@ function kartaAnkiety(ankieta, { zamknieta = false } = {}) {
   });
 
   if (!zamknieta) {
-    // Przyciski z literowym emoji - czysty label (bez numeru), żeby pasowało do liter nad opcjami
+    // Przycisk = sam tekst odpowiedzi (bez emoji)
     const przyciski = opcje.map((tekst, i) => new ButtonBuilder()
       .setCustomId(`ankieta:glos:${ankieta.id}:${i}`)
       .setLabel(tekst.slice(0, 80))
-      .setEmoji(LITERY[i])
       .setStyle(ButtonStyle.Secondary));
     for (let i = 0; i < przyciski.length; i += 5) {
       payload.components[0].addActionRowComponents(
@@ -176,4 +174,4 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('ankieta:glos', onGlos);
 }
 
-module.exports = { rejestruj, utworzAnkiete, uruchomCyklZamykania, zamknijAnkiete, anonimowaPoWiadomosci, kartaAnkiety, LITERY };
+module.exports = { rejestruj, utworzAnkiete, uruchomCyklZamykania, zamknijAnkiete, anonimowaPoWiadomosci, kartaAnkiety };
