@@ -11,6 +11,8 @@ module.exports = {
     .setDMPermission(false)
     .addUserOption(o => o.setName('osoba').setDescription('Kogo ukarać').setRequired(true))
     .addStringOption(o => o.setName('kara').setDescription('Jaka kara (np. 5 diamentów, mute 1h)').setRequired(true).setMaxLength(300))
+    // Obowiązkowa decyzja: czy kara ma się pojawić w historii ostrzeżeń (/warny) ukaranego
+    .addBooleanOption(o => o.setName('do-warnow').setDescription('Czy kara ma się pokazać w ostrzeżeniach (/warny) tej osoby').setRequired(true))
     .addStringOption(o => o.setName('powod').setDescription('Za co (np. przeszkadzanie w rozprawie)').setMaxLength(300))
     .addStringOption(o => o.setName('numer').setDescription('Numer sprawy (SNZ-RRRR-NNNN) — niepotrzebny na kanale sprawy')),
 
@@ -32,10 +34,12 @@ module.exports = {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const kara = interaction.options.getString('kara').trim();
     const powod = interaction.options.getString('powod')?.trim();
-    const wynik = await dodajKare(interaction.client, sprawa, osoba.id, kara, powod, interaction.user.id);
+    const doWarnow = interaction.options.getBoolean('do-warnow', true);
+    const wynik = await dodajKare(interaction.client, sprawa, osoba.id, kara, powod, interaction.user.id, { doWarnow });
     if (wynik.blad) return interaction.editReply(karty.kartaBlad('Nie nałożono kary', wynik.blad));
-    return interaction.editReply(karty.kartaSukces('Kara nałożona',
+    return interaction.editReply(karty.kartaSukces(`Kara #K${wynik.karaId} nałożona`,
       `<@${osoba.id}> — **${kara}**${powod ? ` (${powod})` : ''}\n**Sprawa:** ${sprawa.numer}${wynik.kanalId ? ` — <#${wynik.kanalId}>` : ''}\n` +
-      'Kara trafiła do logów sądu i historii ostrzeżeń; po jej wykonaniu oznacz ją przez `/sprawa-splacona`.'));
+      (doWarnow ? 'Kara trafiła do logów sądu i historii ostrzeżeń' : 'Kara trafiła do logów sądu (bez wpisu w ostrzeżeniach)') +
+      '; po jej wykonaniu oznacz ją przez `/sprawa-splacona`.'));
   },
 };

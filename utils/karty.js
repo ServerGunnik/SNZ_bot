@@ -631,6 +631,10 @@ function kartaSprawy({ sprawa, dowody = [] }) {
   if (sprawa.status === 'zlozona' && !sprawa.sedzia_id) {
     przyciski.push(przycisk(`sad:przyjmij:${sprawa.id}`, 'Przyjmij sprawę', ButtonStyle.Success));
   }
+  // Prokurator może przejąć oskarżenie, dopóki nie zapadł wyrok
+  if (['zlozona', 'przyjeta', 'w_toku'].includes(sprawa.status) && !sprawa.prokurator_id) {
+    przyciski.push(przycisk(`sad:prokurator:${sprawa.id}`, 'Przejmij oskarżenie (Prokurator)', ButtonStyle.Secondary, '⚖️'));
+  }
   if (['przyjeta', 'w_toku'].includes(sprawa.status) && sprawa.sedzia_id) {
     przyciski.push(
       przycisk(`sad:dowod:${sprawa.id}`, 'Dodaj dowód', ButtonStyle.Secondary),
@@ -662,7 +666,131 @@ const WYROK_WOBEC_EMOJI = {
   usunieta: '🗑️',
 };
 
-// wykonanie: { zobowiazani: [{ userId, rola, kara, splata: { oznaczyl, data } | null }], kary: [wiersze sprawy_kary], splacona }
+// wykonanie: { zobowiazani: [{ userId, rola, karyId: [id], splata: { id, oznaczyl, data } | null }], kary: [dodatkowe kary - wiersze sprawy_kary], splacona }
+// ---- Historia spraw sądowych (/historia-spraw) --------------------------
+
+const STATUS_SPRAWY = {
+  zlozona: '📨 złożona',
+  przyjeta: '📂 przyjęta',
+  w_toku: '⚖️ w toku',
+  wyrok: '🔨 wyrok',
+  odwolanie: '↩️ odwołanie',
+  zamknieta: '🔒 zamknięta',
+};
+const FILTR_STATUSU = { wszystkie: 'wszystkie', w_toku: 'w toku', zakonczone: 'zakończone' };
+const skroc = (t, n) => (t && t.length > n ? `${t.slice(0, n - 1)}…` : (t || ''));
+const data = (ms) => (ms ? `<t:${Math.floor(ms / 1000)}:d>` : '—');
+
+// Linia o wykonaniu wyroku: ✅ spłacona / ⏳ x/y
+function opisSplaty(wykonanie) {
+  if (!wykonanie?.zobowiazani.length) return '';
+  const splacone = wykonanie.zobowiazani.filter(z => z.splata).length;
+  return wykonanie.splacona ? ' • ✅ spłacona' : ` • ⏳ spłacono ${splacone}/${wykonanie.zobowiazani.length}`;
+}
+
+// wpisy: [{ sprawa, role: ['pozwany', …] | null, wykonanie | null }]
+// stan: "gracz:sedzia:status" zakodowany do customId przycisków (zachowuje filtry przy zmianie strony)
+function kartaHistoriiSpraw({ wpisy, total, strona, stron, stan, filtr, podsumowanie = null, ograniczone = false }) {
+  const c = kontener(kolory.info);
+  c.addTextDisplayComponents(tekst('## 📚 Historia spraw sądowych'));
+  const opisFiltra = [
+    filtr.gracz ? `gracz <@${filtr.gracz}>` : null,
+    filtr.sedzia ? `sędzia <@${filtr.sedzia}>` : null,
+    `status: ${FILTR_STATUSU[filtr.status] || filtr.status}`,
+  ].filter(Boolean).join(' • ');
+  c.addTextDisplayComponents(tekst(`-# ${opisFiltra} • razem: ${total}${stron > 1 ? ` • strona ${strona} z ${stron}` : ''}` +
+    (ograniczone ? '\n-# Widzisz tylko sprawy, w których brałeś(aś) udział.' : '')));
+  if (podsumowanie) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(podsumowanie));
+  }
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(wpisy.length
+    ? wpisy.map(({ sprawa, role, wykonanie }) => {
+        const naglowek = `**${sprawa.numer}** • ${STATUS_SPRAWY[sprawa.status] || sprawa.status} • ${data(sprawa.utworzona)}` +
+          (role?.length ? ` • _${role.join(', ')}_` : '');
+        const strony = `╰ <@${sprawa.pozywajacy_id}> ⟶ ${opisPozwanego(sprawa)}` +
+          (sprawa.sedzia_id ? ` • sędzia <@${sprawa.sedzia_id}>` : ' • bez sędziego') +
+          (sprawa.prokurator_id ? ' • ⚖️ prokurator' : '');
+        const tresc = `╰ ${skroc(sprawa.zarzut, 80)}` +
+          (sprawa.werdykt ? `\n╰ Wyrok: ${skroc(sprawa.kara || sprawa.werdykt, 70)}${opisSplaty(wykonanie)}` : '');
+        return `${naglowek}\n${strony}\n${tresc}`;
+      }).join('\n\n')
+    : '_Brak spraw dla wybranych filtrów._'));
+  c.addSeparatorComponents(separator(false));
+  if (wpisy.length) {
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`hspr:szcz:${stan}:${strona}`)
+        .setPlaceholder('Pokaż szczegóły sprawy…')
+        .addOptions(wpisy.map(({ sprawa }) => new StringSelectMenuOptionBuilder()
+          .setLabel(skroc(`${sprawa.numer} — ${sprawa.zarzut}`, 100))
+          .setValue(String(sprawa.id)))),
+    ));
+  }
+  if (stron > 1) {
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      przycisk(`hspr:str:${stan}:${strona - 1}`, '‹ Poprzednia', ButtonStyle.Secondary, null, strona === 1),
+      przycisk(`hspr:str:${stan}:${strona + 1}`, 'Następna ›', ButtonStyle.Secondary, null, strona === stron),
+    ));
+  }
+  return { components: [c], ...FLAGS_V2 };
+}
+
+// Pełna karta jednej sprawy z historii. powrot: customId przycisku powrotu do listy (albo null)
+function kartaSzczegolowSprawy({ sprawa, wykonanie = null, liczbaDowodow = 0, guildId, powrot = null }) {
+  const c = kontener(['wyrok', 'zamknieta'].includes(sprawa.status) ? kolory.neutralny : kolory.info);
+  c.addTextDisplayComponents(tekst(`## Sprawa ${sprawa.numer}`));
+  c.addTextDisplayComponents(tekst(`-# ${STATUS_SPRAWY[sprawa.status] || sprawa.status}` +
+    (sprawa.wyrok_data ? ` • rozprawa ${sprawa.wyrok_publiczny ? 'publiczna' : 'niepubliczna'}` : '')));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**Pozywający:** <@${sprawa.pozywajacy_id}>\n` +
+    liniaOskarzajacego(sprawa) +
+    `**Pozwany:** ${opisPozwanego(sprawa)}\n` +
+    `**Sędzia:** ${sprawa.sedzia_id ? `<@${sprawa.sedzia_id}>` : '_brak_'}` +
+    (sprawa.poprzedni_sedzia ? ` _(wcześniej <@${sprawa.poprzedni_sedzia}>)_` : '') + '\n' +
+    `**Złożona:** <t:${Math.floor(sprawa.utworzona / 1000)}:f>` +
+    (sprawa.wyrok_data ? `\n**Wyrok:** <t:${Math.floor(sprawa.wyrok_data / 1000)}:f>` : '') +
+    (sprawa.zamknieta ? `\n**Zamknięta:** <t:${Math.floor(sprawa.zamknieta / 1000)}:f>` : '')
+  ));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    `**Zarzut:** ${skroc(sprawa.zarzut, 300)}\n\n**Opis:**\n${skroc(sprawa.opis, 900)}` +
+    (sprawa.dowody ? `\n\n**Dowody wstępne:** ${skroc(sprawa.dowody, 300)}` : '') +
+    (liczbaDowodow ? `\n**Dowody dodatkowe:** ${liczbaDowodow}` : '')
+  ));
+  if (sprawa.werdykt) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(
+      `**Werdykt:** ${skroc(sprawa.werdykt, 500)}\n**Kara:** ${skroc(sprawa.kara, 300)}` +
+      (sprawa.wyrok_wobec ? `\n**Wyrok wobec:** ${WYROK_WOBEC_EMOJI[sprawa.wyrok_wobec] || ''} ${WYROK_WOBEC_ETYKIETY[sprawa.wyrok_wobec] || sprawa.wyrok_wobec}` : '')
+    ));
+  }
+  if (wykonanie?.wszystkieKary?.length) {
+    c.addSeparatorComponents(separator(true));
+    const splaty = new Map(wykonanie.zobowiazani.map(z => [z.userId, z.splata]));
+    c.addTextDisplayComponents(tekst(
+      `### Kary — ${wykonanie.splacona ? '✅ sprawa spłacona' : '⏳ w trakcie wykonania'}\n` +
+      wykonanie.wszystkieKary.map(k => {
+        const sp = splaty.get(k.user_id);
+        return `\`#K${k.id}\` <@${k.user_id}> — ${skroc(k.kara, 80)} _(${k.typ === 'wyrok' ? 'wyrok' : 'dodatkowa'})_ — ` +
+          (sp ? `✅ spłata${sp.id ? ` \`#S${sp.id}\`` : ''} ${data(sp.data)}` : '⏳ niespłacona');
+      }).join('\n').slice(0, 1500)
+    ));
+  }
+  const linki = [];
+  if (sprawa.wyrok_kanal_id && sprawa.wyrok_wiadomosc_id) linki.push(`[karta wyroku](https://discord.com/channels/${guildId}/${sprawa.wyrok_kanal_id}/${sprawa.wyrok_wiadomosc_id})`);
+  if (sprawa.kanal_id && sprawa.status !== 'zamknieta') linki.push(`kanał sprawy: <#${sprawa.kanal_id}>`);
+  if (sprawa.status === 'zamknieta') linki.push('transkrypt w logach sądu');
+  if (linki.length) c.addTextDisplayComponents(tekst(`-# ${linki.join(' • ')}`));
+  if (powrot) {
+    c.addSeparatorComponents(separator(false));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(przycisk(powrot, '‹ Wróć do listy', ButtonStyle.Secondary)));
+  }
+  return { components: [c], ...FLAGS_V2 };
+}
+
 function kartaWyroku({ sprawa, wykonanie = null }) {
   const c = kontener(wykonanie?.splacona ? kolory.neutralny : kolory.sukces);
   c.addTextDisplayComponents(tekst(`## ${wykonanie?.splacona ? '✅ ' : ''}Wyrok w sprawie ${sprawa.numer}`));
@@ -680,15 +808,18 @@ function kartaWyroku({ sprawa, wykonanie = null }) {
   if (wykonanie?.kary.length) {
     c.addSeparatorComponents(separator(true));
     c.addTextDisplayComponents(tekst('### Dodatkowe kary z rozprawy\n' + wykonanie.kary.map(k =>
-      `• <@${k.user_id}> — ${k.kara}${k.powod ? ` _(${k.powod})_` : ''}`).join('\n').slice(0, 1500)));
+      `• \`#K${k.id}\` <@${k.user_id}> — ${k.kara}${k.powod ? ` _(${k.powod})_` : ''}`).join('\n').slice(0, 1500)));
   }
   if (wykonanie?.zobowiazani.length) {
     c.addSeparatorComponents(separator(true));
     c.addTextDisplayComponents(tekst(
       `### Wykonanie wyroku — ${wykonanie.splacona ? '✅ sprawa spłacona' : '⏳ w trakcie'}\n` +
-      wykonanie.zobowiazani.map(z => z.splata
-        ? `✅ <@${z.userId}> (${z.rola}) — spłacił(a), oznaczył(a) <@${z.splata.oznaczyl}> <t:${Math.floor(z.splata.data / 1000)}:f>`
-        : `⏳ <@${z.userId}> (${z.rola}) — nie spłacono`).join('\n').slice(0, 1500)));
+      wykonanie.zobowiazani.map(z => {
+        const kary = z.karyId?.length ? ` ${z.karyId.map(id => `\`#K${id}\``).join(', ')}` : '';
+        return z.splata
+          ? `✅ <@${z.userId}> (${z.rola})${kary} — spłata${z.splata.id ? ` \`#S${z.splata.id}\`` : ''}, oznaczył(a) <@${z.splata.oznaczyl}> <t:${Math.floor(z.splata.data / 1000)}:f>`
+          : `⏳ <@${z.userId}> (${z.rola})${kary} — nie spłacono`;
+      }).join('\n').slice(0, 1500)));
   }
   return { components: [c], ...FLAGS_V2 };
 }
@@ -793,6 +924,17 @@ function panelSelfrole(grupa, role) {
 
 // ---- Ostrzeżenia -------------------------------------------------------
 
+// Opis progów ostrzeżeń (0 = wyłączony próg jest pomijany)
+function opisProgow(progi) {
+  const czesci = [];
+  if (progi.rozprawa > 0) czesci.push(`rozprawa sądowa od ${progi.rozprawa}`);
+  if (progi.mute > 0) czesci.push(`wyciszenie od ${progi.mute}`);
+  if (progi.ban > 0) czesci.push(`ban od ${progi.ban}`);
+  if (!czesci.length) return 'Brak automatycznych kar';
+  const tekst = czesci.join(', ') + ' aktywnych';
+  return tekst[0].toUpperCase() + tekst.slice(1);
+}
+
 function kartaOstrzezen({ user_id, warny, avatar, waznoscDni = 0, progi = null }) {
   const aktywne = warny.filter(w => !w.nieaktywne).length;
   const c = kontener(aktywne ? kolory.ostrzezenie : kolory.sukces);
@@ -801,7 +943,7 @@ function kartaOstrzezen({ user_id, warny, avatar, waznoscDni = 0, progi = null }
       tekst(`## Historia ostrzeżeń — <@${user_id}>`),
       tekst(
         `**Aktywnych ostrzeżeń:** ${aktywne} • **wszystkich:** ${warny.length}` +
-        (progi ? `\n-# Wyciszenie od ${progi.mute}, ban od ${progi.ban} aktywnych${waznoscDni > 0 ? ` • ostrzeżenie wygasa po ${waznoscDni} dniach` : ''}` : '')
+        (progi ? `\n-# ${opisProgow(progi)}${waznoscDni > 0 ? ` • ostrzeżenie wygasa po ${waznoscDni} dniach` : ''}` : '')
       ),
     )
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatar));
@@ -818,6 +960,67 @@ function kartaOstrzezen({ user_id, warny, avatar, waznoscDni = 0, progi = null }
   return { components: [c], ...FLAGS_V2 };
 }
 
+// ---- Rekrutacja: panel z formularzem i karta podania ------------------
+
+function panelRekrutacji() {
+  const c = kontener(kolory.neutralny);
+  c.addTextDisplayComponents(tekst('## Rekrutacja do SNZ'));
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(
+    'Chcesz dołączyć do Sojuszu Narodów Zjednoczonych? Kliknij przycisk poniżej i wypełnij krótki formularz.\n\n' +
+    '**W formularzu podasz**\n' +
+    '• Nick z Minecrafta\n' +
+    '• Wiek\n' +
+    '• Dlaczego chcesz do nas dołączyć\n' +
+    '• Doświadczenie i co możesz wnieść\n' +
+    '• Ile czasu możesz poświęcić\n\n' +
+    'Podanie rozpatrzy administracja — o decyzji dostaniesz wiadomość prywatną od bota.'
+  ));
+  c.addSeparatorComponents(separator(false));
+  c.addActionRowComponents(new ActionRowBuilder().addComponents(
+    przycisk('rek:podanie', 'Złóż podanie', ButtonStyle.Success, '📝')
+  ));
+  return { components: [c], ...FLAGS_V2 };
+}
+
+function kartaPodania({ podanie, glowaUrl = null }) {
+  const statusy = { przyjete: '✅ przyjęte', odrzucone: '❌ odrzucone' };
+  const kolor = podanie.status === 'przyjete' ? kolory.sukces : podanie.status === 'odrzucone' ? kolory.blad : kolory.info;
+  const c = kontener(kolor);
+  const naglowek = `## Podanie rekrutacyjne #${podanie.id}\n` +
+    `**Kandydat:** <@${podanie.user_id}>\n` +
+    `**Nick MC:** \`${podanie.nick}\`\n` +
+    `**Wiek:** ${podanie.wiek}\n` +
+    `**Złożone:** <t:${Math.floor(podanie.utworzono / 1000)}:f>`;
+  if (glowaUrl) {
+    c.addSectionComponents(new SectionBuilder()
+      .addTextDisplayComponents(tekst(naglowek))
+      .setThumbnailAccessory(new ThumbnailBuilder().setURL(glowaUrl)));
+  } else {
+    c.addTextDisplayComponents(tekst(naglowek));
+  }
+  c.addSeparatorComponents(separator(true));
+  c.addTextDisplayComponents(tekst(tekstFormularza([
+    { label: 'Dlaczego chce dołączyć', wartosc: podanie.powod },
+    { label: 'Doświadczenie / co może wnieść', wartosc: podanie.doswiadczenie },
+    { label: 'Aktywność', wartosc: podanie.aktywnosc },
+  ])));
+  if (statusy[podanie.status]) {
+    c.addSeparatorComponents(separator(true));
+    c.addTextDisplayComponents(tekst(
+      `**Decyzja:** ${statusy[podanie.status]}${podanie.rozpatrzyl ? ` — <@${podanie.rozpatrzyl}>` : ''}` +
+      (podanie.uzasadnienie ? `\n**Uzasadnienie:** ${podanie.uzasadnienie}` : '')
+    ));
+  } else {
+    c.addSeparatorComponents(separator(false));
+    c.addActionRowComponents(new ActionRowBuilder().addComponents(
+      przycisk(`rek:decyzja:ok:${podanie.id}`, 'Przyjmij', ButtonStyle.Success),
+      przycisk(`rek:decyzja:no:${podanie.id}`, 'Odrzuć', ButtonStyle.Danger),
+    ));
+  }
+  return { components: [c], ...FLAGS_V2 };
+}
+
 module.exports = {
   FLAGS_V2,
   tekst, separator, kontener, przycisk, link,
@@ -826,9 +1029,10 @@ module.exports = {
   kartaWynikuTicketu, kartaHistoriiTicketu, kartaHistoriiUzytkownika, kartaPliku, kartaNarady,
   kartaPanstwa, kartaListySojuszu, kartaSkladuPanstwa, kartaConfigu,
   kartaListuGonczego, kartaZgloszeniaListu, kartaListyListow, kartaDowodowZatrzymania, kartaPotwierdzeniaNagrody,
-  kartaSprawy, kartaWyroku, kartaWyborWerdyktu, kartaPytanieOPublikacje,
+  kartaSprawy, kartaWyroku, kartaHistoriiSpraw, kartaSzczegolowSprawy, kartaWyborWerdyktu, kartaPytanieOPublikacje,
   WYROK_WOBEC_ETYKIETY, WYROK_WOBEC_EMOJI,
   kartaModCall, kartaPowitania,
   panelSelfrole,
   kartaOstrzezen,
+  panelRekrutacji, kartaPodania,
 };

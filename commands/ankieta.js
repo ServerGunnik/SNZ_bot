@@ -85,7 +85,8 @@ async function stworz(interaction) {
         question: { text: pytanie },
         answers: odpowiedzi.map(text => ({ text })),
         duration: godziny,
-        allow_multiselect: wiele,
+        // discord.js oczekuje camelCase - `allow_multiselect` był ignorowany i wielokrotny wybór nie działał
+        allowMultiselect: wiele,
       },
     }).catch(e => ({ blad: e.message }));
     if (wiad?.blad) {

@@ -44,6 +44,11 @@ dodajKolumne('sprawy', 'wyrok_wobec', 'TEXT');
 dodajKolumne('sprawy', 'wyrok_publiczny', 'INTEGER DEFAULT 0');
 // Oskarżający z ramienia prokuratury (/sprawa-prokuratora) i znacznik decyzji o publikacji wyroku
 dodajKolumne('sprawy', 'prokurator_id', 'TEXT');
+// ID kar i spłat (jak przy ostrzeżeniach): kary z wyroku też są wierszami sprawy_kary (typ 'wyrok'),
+// spłata dostaje własny numer; istniejące spłaty numerowane w kolejności zapisu
+dodajKolumne('sprawy_kary', 'typ', "TEXT NOT NULL DEFAULT 'dodatkowa'");
+dodajKolumne('sprawy_splaty', 'id', 'INTEGER');
+db.exec('UPDATE sprawy_splaty SET id = rowid WHERE id IS NULL');
 dodajKolumne('sprawy', 'prokurator_nick', 'TEXT');
 dodajKolumne('sprawy', 'publikacja_data', 'INTEGER');
 // Wiadomości z kartą wyroku (kanał wyroków / spraw niepublicznych + logi sądu) - odświeżane po spłacie i karach

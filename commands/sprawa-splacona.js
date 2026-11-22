@@ -30,7 +30,7 @@ module.exports = {
     const wynik = await oznaczSplate(interaction.client, sprawa, osoba.id, interaction.user.id);
     if (wynik.blad) return interaction.editReply(karty.kartaBlad('Nie oznaczono', wynik.blad));
     return interaction.editReply(wynik.stan.splacona
-      ? karty.kartaSukces('Sprawa spłacona', `<@${osoba.id}> spłacił(a) karę. Wszystkie kary w sprawie **${sprawa.numer}** zostały wykonane — karta wyroku jest oznaczona jako spłacona.`)
-      : karty.kartaSukces('Spłata zapisana', `<@${osoba.id}> spłacił(a) karę w sprawie **${sprawa.numer}**.\n⏳ Jeszcze nie spłacili: ${wynik.pozostali.map(z => `<@${z.userId}>`).join(', ')}`));
+      ? karty.kartaSukces('Sprawa spłacona', `Spłata \`#S${wynik.splataId}\`: <@${osoba.id}> spłacił(a) karę. Wszystkie kary w sprawie **${sprawa.numer}** zostały wykonane — karta wyroku jest oznaczona jako spłacona.`)
+      : karty.kartaSukces('Spłata zapisana', `Spłata \`#S${wynik.splataId}\`: <@${osoba.id}> spłacił(a) karę w sprawie **${sprawa.numer}**.\n⏳ Jeszcze nie spłacili: ${wynik.pozostali.map(z => `<@${z.userId}>`).join(', ')}`));
   },
 };

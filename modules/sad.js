@@ -1,5 +1,5 @@
 const {
-  MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType,
+  MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, PermissionFlagsBits,
 } = require('discord.js');
 const db = require('../database/db.js');
 const config = require('../config.js');
@@ -38,9 +38,20 @@ const q = {
   poKanale: db.prepare('SELECT * FROM sprawy WHERE kanal_id = ?'),
   zapiszWiadomosciWyroku: db.prepare('UPDATE sprawy SET wyrok_kanal_id = ?, wyrok_wiadomosc_id = ?, wyrok_log_id = ? WHERE id = ?'),
   kary: db.prepare('SELECT * FROM sprawy_kary WHERE sprawa_id = ? ORDER BY id'),
-  wstawKare: db.prepare('INSERT INTO sprawy_kary (sprawa_id, user_id, kara, powod, nalozyl, data) VALUES (?, ?, ?, ?, ?, ?)'),
+  wstawKare: db.prepare("INSERT INTO sprawy_kary (sprawa_id, user_id, kara, powod, nalozyl, data, typ) VALUES (?, ?, ?, ?, ?, ?, 'dodatkowa')"),
+  wstawKareWyroku: db.prepare("INSERT INTO sprawy_kary (sprawa_id, user_id, kara, powod, nalozyl, data, typ) VALUES (?, ?, ?, ?, ?, ?, 'wyrok')"),
+  karyWyrokuSprawy: db.prepare("SELECT COUNT(*) c FROM sprawy_kary WHERE sprawa_id = ? AND typ = 'wyrok'"),
   splaty: db.prepare('SELECT * FROM sprawy_splaty WHERE sprawa_id = ?'),
-  wstawSplate: db.prepare('INSERT OR IGNORE INTO sprawy_splaty (sprawa_id, user_id, oznaczyl, data) VALUES (?, ?, ?, ?)'),
+  ostatniaSprawa: db.prepare('SELECT numer FROM sprawy ORDER BY id DESC LIMIT 1'),
+  utworzSprawe: db.prepare(`INSERT INTO sprawy
+    (numer, pozywajacy_id, pozwany_typ, pozwany_wartosc, zarzut, opis, dowody, utworzona)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+  zapiszKanalSprawy: db.prepare('UPDATE sprawy SET kanal_id = ?, wiadomosc_id = ? WHERE id = ?'),
+  // Otwarta sprawa z urzędu (pozywający = bot) przeciw graczowi - żeby kolejny warn nie zakładał drugiej
+  otwartaZUrzedu: db.prepare("SELECT * FROM sprawy WHERE pozwany_typ = 'gracz' AND pozwany_wartosc = ? AND pozywajacy_id = ? AND status IN ('zlozona','przyjeta','w_toku')"),
+  // Spłata dostaje kolejny numer (#S…), niezależny od sprawy
+  wstawSplate: db.prepare('INSERT OR IGNORE INTO sprawy_splaty (sprawa_id, user_id, oznaczyl, data, id) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(id), 0) + 1 FROM sprawy_splaty))'),
+  splataOsoby: db.prepare('SELECT * FROM sprawy_splaty WHERE sprawa_id = ? AND user_id = ?'),
 };
 
 // ---- Cooldown pozwów ---------------------------------------------------
@@ -343,13 +354,18 @@ async function onWyrokModal(interaction) {
   // Ostrzeżenie w historii pozwanego gracza - tylko gdy wyrok skierowany przeciwko pozwanemu (lub obojgu)
   // Uniewinniony/usunieta/oskarzajacy nie dają warna pozwanemu
   const pozwanyId = sprawa.pozwany_typ === 'panstwo' ? null : idPozwanego(sprawa);
+  uzupelnijKaryWyroku(q.poId.get(id));
+  const karyWyroku = q.kary.all(id).filter(k => k.typ === 'wyrok');
   if (pozwanyId && (wobec === 'pozwany' || wobec === 'oboje')) {
-    q.wstawWarn.run(pozwanyId, `Wyrok ${sprawa.numer}: ${kara}`, interaction.user.id, Date.now(), id);
+    const karaPozwanego = karyWyroku.find(k => k.user_id === pozwanyId);
+    q.wstawWarn.run(pozwanyId, `Wyrok ${sprawa.numer}${karaPozwanego ? ` (kara ${idKary(karaPozwanego.id)})` : ''}: ${kara}`, interaction.user.id, Date.now(), id);
   }
 
   await log(interaction.client, {
     tytul: 'Wyrok wydany',
-    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Wobec:** ${karty.WYROK_WOBEC_ETYKIETY[wobec]}\n**Kara:** ${kara}\nWyrok jest ostateczny. Oczekuje na decyzję o publikacji.`,
+    opis: `**Sprawa:** ${sprawa.numer}\n**Sędzia:** <@${interaction.user.id}>\n**Wobec:** ${karty.WYROK_WOBEC_ETYKIETY[wobec]}\n**Kara:** ${kara}` +
+      (karyWyroku.length ? `\n**Numery kar:** ${karyWyroku.map(k => `\`${idKary(k.id)}\` <@${k.user_id}>`).join(', ')}` : '') +
+      `\nWyrok jest ostateczny. Oczekuje na decyzję o publikacji.`,
     kolor: kolory.sukces,
     kanal: 'logiSad',
   });
@@ -434,8 +450,34 @@ function mozeProwadzicSprawe(member, sprawa) {
 }
 
 // Kto musi wykonać karę: strony wskazane w wyroku + osoby z dodatkowymi karami (jedna pozycja na osobę)
+// Numery kar i spłat (jak #id przy ostrzeżeniach)
+const idKary = (id) => `#K${id}`;
+const idSplaty = (id) => `#S${id}`;
+
+// Strony skazane wyrokiem (bez dodatkowych kar)
+function skazaniWyrokiem(sprawa) {
+  const wynik = [];
+  if (!sprawa.wyrok_data) return wynik;
+  const wobec = sprawa.wyrok_wobec || 'pozwany';
+  if (wobec === 'oskarzajacy' || wobec === 'oboje') wynik.push({ userId: sprawa.pozywajacy_id, rola: 'Oskarżający' });
+  if (wobec === 'pozwany' || wobec === 'oboje') wynik.push({ userId: idPozwanego(sprawa), rola: sprawa.pozwany_typ === 'panstwo' ? 'Pozwany (król państwa)' : 'Pozwany' });
+  return wynik.filter(w => w.userId);
+}
+
+// Kara z wyroku dostaje wiersz w sprawy_kary (typ 'wyrok'), żeby miała swój numer #K…
+// Wywoływane przy wyroku; dla starszych wyroków uzupełnia się przy pierwszym odczycie.
+function uzupelnijKaryWyroku(sprawa) {
+  if (!sprawa?.wyrok_data || !sprawa.kara) return;
+  if (q.karyWyrokuSprawy.get(sprawa.id).c > 0) return;
+  for (const s of skazaniWyrokiem(sprawa)) {
+    q.wstawKareWyroku.run(sprawa.id, s.userId, sprawa.kara, `Wyrok ${sprawa.numer}`, sprawa.sedzia_id || 'SAD', sprawa.wyrok_data);
+  }
+}
+
 function stanWykonania(sprawa) {
-  const kary = q.kary.all(sprawa.id);
+  uzupelnijKaryWyroku(sprawa);
+  const wszystkieKary = q.kary.all(sprawa.id);
+  const kary = wszystkieKary.filter(k => k.typ !== 'wyrok');
   const splaty = new Map(q.splaty.all(sprawa.id).map(s => [s.user_id, s]));
   const osoby = new Map();
   const dodaj = (userId, rola) => {
@@ -445,16 +487,15 @@ function stanWykonania(sprawa) {
       if (!z.rola.includes(rola)) z.rola += `, ${rola.toLowerCase()}`;
       return;
     }
-    osoby.set(userId, { userId, rola, splata: splaty.get(userId) || null });
+    osoby.set(userId, {
+      userId, rola, splata: splaty.get(userId) || null,
+      karyId: wszystkieKary.filter(k => k.user_id === userId).map(k => k.id),
+    });
   };
-  if (sprawa.wyrok_data) {
-    const wobec = sprawa.wyrok_wobec || 'pozwany';
-    if (wobec === 'oskarzajacy' || wobec === 'oboje') dodaj(sprawa.pozywajacy_id, 'Oskarżający');
-    if (wobec === 'pozwany' || wobec === 'oboje') dodaj(idPozwanego(sprawa), sprawa.pozwany_typ === 'panstwo' ? 'Pozwany (król państwa)' : 'Pozwany');
-  }
+  for (const s of skazaniWyrokiem(sprawa)) dodaj(s.userId, s.rola);
   for (const k of kary) dodaj(k.user_id, 'Dodatkowa kara');
   const zobowiazani = [...osoby.values()];
-  return { zobowiazani, kary, splacona: zobowiazani.length > 0 && zobowiazani.every(z => z.splata) };
+  return { zobowiazani, kary, wszystkieKary, splacona: zobowiazani.length > 0 && zobowiazani.every(z => z.splata) };
 }
 
 function kartaWyrokuSprawy(sprawa) {
@@ -489,28 +530,33 @@ async function oznaczSplate(client, sprawa, userId, przezId) {
   }
 
   q.wstawSplate.run(sprawa.id, userId, przezId, Date.now());
+  const splata = q.splataOsoby.get(sprawa.id, userId);
   const stan = stanWykonania(sprawa);
   await odswiezKartyWyroku(client, sprawa.id);
   const pozostali = stan.zobowiazani.filter(z => !z.splata);
   await log(client, {
     tytul: stan.splacona ? `Sprawa ${sprawa.numer} spłacona w całości` : `Spłata kary — ${sprawa.numer}`,
-    opis: `**Spłacił(a):** <@${userId}> (${osoba.rola})\n**Oznaczył(a):** <@${przezId}>\n` +
+    opis: `**Spłata:** \`${idSplaty(splata.id)}\`\n**Spłacił(a):** <@${userId}> (${osoba.rola})\n` +
+      `**Kary:** ${osoba.karyId.map(id => `\`${idKary(id)}\``).join(', ') || '—'}\n**Oznaczył(a):** <@${przezId}>\n` +
       (stan.splacona ? '✅ Wszystkie kary w sprawie zostały wykonane.' : `⏳ **Jeszcze nie spłacili:** ${pozostali.map(z => `<@${z.userId}>`).join(', ')}`),
     kolor: stan.splacona ? kolory.sukces : kolory.info,
     kanal: 'logiSad',
   });
-  return { stan, osoba, pozostali };
+  return { stan, osoba, pozostali, splataId: splata.id };
 }
 
-async function dodajKare(client, sprawa, userId, kara, powod, przezId) {
+// doWarnow: czy kara pojawia się w historii ostrzeżeń ukaranego (/warny) - decyduje nakładający
+async function dodajKare(client, sprawa, userId, kara, powod, przezId, { doWarnow = true } = {}) {
   if (!['przyjeta', 'w_toku', 'wyrok'].includes(sprawa.status)) {
     return { blad: `Sprawa **${sprawa.numer}** nie jest w toku — kary można nakładać tylko podczas rozprawy (do jej zamknięcia).` };
   }
-  q.wstawKare.run(sprawa.id, userId, kara, powod || null, przezId, Date.now());
-  // Dodatkowa kara trafia też do historii ostrzeżeń ukaranego
-  q.wstawWarn.run(userId, `Kara na rozprawie ${sprawa.numer}: ${kara}${powod ? ` (${powod})` : ''}`, przezId, Date.now(), sprawa.id);
+  const karaId = q.wstawKare.run(sprawa.id, userId, kara, powod || null, przezId, Date.now()).lastInsertRowid;
+  if (doWarnow) {
+    q.wstawWarn.run(userId, `Kara ${idKary(karaId)} na rozprawie ${sprawa.numer}: ${kara}${powod ? ` (${powod})` : ''}`, przezId, Date.now(), sprawa.id);
+  }
 
-  const opis = `**Ukarany(a):** <@${userId}>\n**Kara:** ${kara}${powod ? `\n**Powód:** ${powod}` : ''}\n**Nałożył(a):** <@${przezId}>`;
+  const opis = `**Kara:** \`${idKary(karaId)}\`\n**Ukarany(a):** <@${userId}>\n**Treść kary:** ${kara}${powod ? `\n**Powód:** ${powod}` : ''}\n**Nałożył(a):** <@${przezId}>` +
+    `\n**W ostrzeżeniach:** ${doWarnow ? 'tak' : 'nie'}`;
   const kanal = sprawa.kanal_id ? await client.channels.fetch(sprawa.kanal_id).catch(() => null) : null;
   if (kanal) {
     await kanal.send({
@@ -520,7 +566,7 @@ async function dodajKare(client, sprawa, userId, kara, powod, przezId) {
   }
   await log(client, { tytul: `Dodatkowa kara — ${sprawa.numer}`, opis, kolor: kolory.ostrzezenie, kanal: 'logiSad' });
   await odswiezKartyWyroku(client, sprawa.id);
-  return { kanalId: kanal?.id || null };
+  return { kanalId: kanal?.id || null, karaId };
 }
 
 async function dodajUczestnika(client, sprawa, userId, przezId) {
@@ -596,6 +642,7 @@ function rejestruj({ zarejestruj }) {
   zarejestruj('sad:wyrok-publikuj', onWyrokPublikuj);
   zarejestruj('sad:odwol', onOdwolanie);
   zarejestruj('sad:zamknij', onZamknijPrzycisk);
+  zarejestruj('sad:prokurator', onProkuratorPrzycisk);
 }
 
 // Prokurator przypisuje się jako oskarżający (/sprawa-prokuratora). Zwraca { blad } albo { sprawa }.
@@ -628,8 +675,113 @@ async function przypiszProkuratora(guild, sprawa, member) {
   return { sprawa: q.poId.get(sprawa.id), nick };
 }
 
+// ---- Numer sprawy (wspólny dla /pozew i spraw z urzędu) ------------------
+
+function nastepnyNumer() {
+  const rok = new Date().getFullYear();
+  const ostatnia = q.ostatniaSprawa.get();
+  let n = 1;
+  if (ostatnia?.numer) {
+    const m = ostatnia.numer.match(/^SNZ-(\d{4})-(\d+)$/);
+    if (m && parseInt(m[1], 10) === rok) n = parseInt(m[2], 10) + 1;
+  }
+  return `SNZ-${rok}-${String(n).padStart(4, '0')}`;
+}
+
+// ---- Sprawa z urzędu za ostrzeżenia ------------------------------------
+// Po osiągnięciu progu aktywnych ostrzeżeń (config.ostrzezenia.prog.rozprawa) bot sam zakłada rozprawę.
+// Pozywającym jest bot (Sąd z urzędu), więc nikt nie dostaje cooldownu na /pozew.
+// Ranga Prokurator widzi kanał sprawy i może ją przejąć przyciskiem albo /sprawa-prokuratora.
+// Zwraca { sprawa, kanal } albo { istniejaca } gdy osoba ma już otwartą sprawę z urzędu.
+
+async function zalozSpraweZaOstrzezenia(guild, { userId, wystawcaId, ostrzezenia }) {
+  const botId = guild.client.user.id;
+  const istniejaca = q.otwartaZUrzedu.get(userId, botId);
+  if (istniejaca) return { istniejaca };
+
+  const lista = ostrzezenia
+    .map(w => `• \`#${w.id}\` ${w.powod} — <@${w.wystawca_id}> <t:${Math.floor(w.data / 1000)}:d>`)
+    .join('\n');
+  const zarzut = `Sprawa z urzędu: ${ostrzezenia.length} aktywne ostrzeżenia`;
+  const opis = (`Gracz <@${userId}> otrzymał ${ostrzezenia.length} aktywne ostrzeżenia. ` +
+    `Ostatnie wystawił <@${wystawcaId}>.\n\n**Ostrzeżenia:**\n${lista}`).slice(0, 3000);
+
+  const numer = nastepnyNumer();
+  const info = q.utworzSprawe.run(numer, botId, 'gracz', userId, zarzut, opis, null, Date.now());
+  const sprawaId = info.lastInsertRowid;
+
+  const staff = config.role.staff;
+  const prokuratorzy = config.role.prokurator.filter(id => guild.roles.cache.has(id));
+  const kategoria = await kategoriaSpraw(guild);
+  const pozwanyNaSerwerze = await guild.members.fetch(userId).catch(() => null);
+  const dostepStrony = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory];
+  const ustawienia = {
+    name: `${config.sad.prefixSprawy}${numer.toLowerCase()}`.slice(0, 90),
+    type: ChannelType.GuildText,
+    parent: kategoria,
+    topic: `Sprawa z urzędu za ostrzeżenia — ${numer}`,
+    permissionOverwrites: [
+      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels] },
+      ...(pozwanyNaSerwerze ? [{ id: userId, allow: dostepStrony }] : []),
+      ...staff.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] })),
+      // Prokuratorzy tylko czytają - prawo pisania dostaje ten, który przejmie oskarżenie
+      ...prokuratorzy.filter(id => !staff.includes(id)).map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory] })),
+    ],
+  };
+  let bladKategorii = null;
+  const kanal = await guild.channels.create(ustawienia).catch(async (e) => {
+    if (!kategoria) throw e;
+    bladKategorii = e.message;
+    return guild.channels.create({ ...ustawienia, parent: null });
+  });
+
+  const sprawa = q.poId.get(sprawaId);
+  const wiad = await kanal.send(karty.kartaSprawy({ sprawa }));
+  q.zapiszKanalSprawy.run(kanal.id, wiad.id, sprawaId);
+
+  const doPingu = [...new Set([...staff, ...prokuratorzy])];
+  if (doPingu.length || pozwanyNaSerwerze) {
+    await kanal.send({
+      content: `${pozwanyNaSerwerze ? `<@${userId}> ` : ''}${doPingu.map(id => `<@&${id}>`).join(' ')}\n` +
+        `Sprawa **${numer}** wszczęta z urzędu za ostrzeżenia. ` +
+        (prokuratorzy.length ? 'Prokurator może przejąć oskarżenie przyciskiem na karcie sprawy. ' : '') +
+        'Staff może przyjąć sprawę jako sędzia.',
+      allowedMentions: { users: pozwanyNaSerwerze ? [userId] : [], roles: doPingu },
+    }).catch(() => null);
+  }
+
+  await log(guild.client, {
+    tytul: 'Sprawa z urzędu za ostrzeżenia',
+    opis: `**Sprawa:** ${numer}\n**Pozwany:** <@${userId}>\n**Aktywne ostrzeżenia:** ${ostrzezenia.length}\n**Ostatnie wystawił:** <@${wystawcaId}>\n**Kanał:** <#${kanal.id}>` +
+      (kategoria && !bladKategorii ? '' : `\n**Uwaga:** kanał powstał poza kategorią „Rozprawy sądowe” (${bladKategorii || 'nie znaleziono kategorii'})`) +
+      (prokuratorzy.length ? '' : '\n**Uwaga:** brak roli Prokurator na serwerze (ROLA_PROKURATOR) — nikt nie zobaczy przycisku przejęcia oskarżenia.'),
+    kolor: kolory.ostrzezenie,
+    kanal: 'logiSad',
+  });
+  return { sprawa: q.poId.get(sprawaId), kanal };
+}
+
+// Przycisk „Przejmij oskarżenie” na karcie sprawy - to samo co /sprawa-prokuratora
+async function onProkuratorPrzycisk(interaction) {
+  if (!jestProkuratorem(interaction.member)) {
+    return interaction.reply({ ...karty.kartaBlad('Brak uprawnień', 'Oskarżenie może przejąć tylko ranga Prokurator.'), flags: EPHEMERAL_V2 });
+  }
+  const [, , idStr] = interaction.customId.split(':');
+  const sprawa = q.poId.get(parseInt(idStr, 10));
+  if (!sprawa) {
+    return interaction.reply({ ...karty.kartaBlad('Brak sprawy', 'Ta sprawa już nie istnieje.'), flags: EPHEMERAL_V2 });
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const wynik = await przypiszProkuratora(interaction.guild, sprawa, interaction.member);
+  if (wynik.blad) return interaction.editReply(karty.kartaBlad('Nie przypisano', wynik.blad));
+  return interaction.editReply(karty.kartaSukces('Jesteś oskarżającym',
+    `⚖️ **Oskarżający:** Prokurator — ${wynik.nick}\n**Sprawa:** ${sprawa.numer}`));
+}
+
 module.exports = {
+  nastepnyNumer, zalozSpraweZaOstrzezenia,
   rejestruj, zamknijSprawe, zmienSedziego, konfliktInteresow, idPozwanego, panstwaUzytkownika,
   stanCooldownu, zdejmijCooldown, kategoriaSpraw, przypiszProkuratora,
-  znajdzSprawe, mozeProwadzicSprawe, stanWykonania, oznaczSplate, dodajKare, dodajUczestnika,
+  znajdzSprawe, mozeProwadzicSprawe, stanWykonania, oznaczSplate, idKary, idSplaty, dodajKare, dodajUczestnika,
 };

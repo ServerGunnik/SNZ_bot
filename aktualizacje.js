@@ -60,4 +60,89 @@ module.exports = [
     ],
     opis: 'Bot od razu potwierdza kliknięcie, a dopiero potem nadaje rolę Sędzia, ustawia dostęp do kanału, wysyła wyrok i zapisuje logi. Wynik pojawia się po chwili w tej samej wiadomości.',
   },
+  {
+    id: '2026-11-15-narada-ticketu',
+    data: '2026-11-15',
+    tytul: 'Poprawka kanału narady administracji przy ticketach',
+    naprawiono: [
+      'Kanał narady administracji (`sprawa-…-administracja`) czasem nie powstawał razem z ticketem',
+      'Gdy kategoria narad jest pełna (50 kanałów) albo niedostępna dla bota, narada powstaje bez kategorii zamiast wcale',
+      'Narada jest widoczna dla tych samych osób co ticket: także rangi sądu przy skargach, techników i ról zamykających tickety',
+    ],
+    opis: 'Jeśli narady nie da się utworzyć, w logach ticketów pojawia się wpis z dokładną przyczyną od Discorda.',
+  },
+  {
+    id: '2026-11-15-warny-rozprawa',
+    data: '2026-11-15',
+    tytul: 'Ostrzeżenia prowadzą do rozprawy sądowej',
+    dodano: [
+      'Przy **3 aktywnych ostrzeżeniach** bot sam zakłada rozprawę sądową z urzędu — staff przyjmuje ją jako sędzia, jak każdą inną sprawę',
+      'Przycisk **⚖️ Przejmij oskarżenie (Prokurator)** na karcie sprawy — ranga Prokurator może przypisać się jako oskarżający jednym kliknięciem',
+      'Nie ma już automatycznego bana po 5 ostrzeżeniach ani automatycznego wyciszenia po 3 — o karze decyduje sąd',
+    ],
+    opis: 'Kanał sprawy z urzędu widzi ukarany gracz, administracja i Prokuratorzy. Dopóki sprawa jest otwarta, kolejne ostrzeżenia nie zakładają nowej.',
+  },
+  {
+    id: '2026-11-15-kara-do-warnow',
+    data: '2026-11-15',
+    tytul: 'Dodatkowa kara: wybór, czy trafia do ostrzeżeń',
+    dodano: [
+      '`/sprawa-dodaj-kare` ma obowiązkową opcję **do-warnow** — nakładający decyduje, czy kara pokaże się w historii ostrzeżeń (`/warny`) ukaranego',
+    ],
+    opis: 'Kara zawsze jest zapisana przy sprawie, na kanale sprawy, w logach sądu i na karcie wyroku. Opcja zmienia tylko wpis w ostrzeżeniach.',
+  },
+  {
+    id: '2026-11-15-id-kar-splat',
+    data: '2026-11-15',
+    tytul: 'Numery kar i spłat',
+    dodano: [
+      'Każda kara z wyroku i każda dodatkowa kara ma numer **#K…** — tak jak ostrzeżenia mają swój #',
+      'Każda spłata kary ma numer **#S…**',
+      'Numery widać na karcie wyroku, w logach sądu, w potwierdzeniach `/sprawa-dodaj-kare` i `/sprawa-splacona` oraz w treści ostrzeżeń',
+    ],
+    opis: 'Wcześniejsze wyroki i spłaty też dostały numery — kary ze starszych wyroków są numerowane przy pierwszym wyświetleniu karty.',
+  },
+  {
+    id: '2026-11-16-historia-spraw',
+    data: '2026-11-16',
+    tytul: 'Historia spraw sądowych',
+    dodano: [
+      '`/historia-spraw` — przegląd wszystkich spraw sądowych z filtrami: gracz, sędzia, status (w toku / zakończone) oraz stronami',
+      'Przy filtrze gracza widać jego rolę w każdej sprawie i podsumowanie: ile razy był pozwanym, pozywającym, sędzią i prokuratorem, ile ma kar i ile spłacił',
+      'Wybór sprawy z listy (albo opcja `numer`) pokazuje szczegóły: strony, sędziego, daty, zarzut, wyrok, kary #K i spłaty #S',
+    ],
+    opis: 'Administracja, ranga sądu i sędziowie widzą wszystkie sprawy. Każdy gracz może sprawdzić swoje sprawy wpisując /historia-spraw bez opcji, a także szczegóły publicznych wyroków.',
+  },
+  {
+    id: '2026-11-16-ticket-ping-duplikat',
+    data: '2026-11-16',
+    tytul: 'Poprawka otwierania ticketów',
+    naprawiono: [
+      'Otwarcie ticketu kończyło się błędem „Invalid Form Body … SET_TYPE_ALREADY_CONTAINS_VALUE”, gdy ta sama rola była wpisana jednocześnie jako staff i helper — kanał powstawał bez karty i bez narady',
+      'Powtórzone role w ustawieniach są teraz pomijane, a nieudany ping nie przerywa już zakładania ticketu',
+    ],
+    opis: 'Rola wpisana jednocześnie jako staff i helper jest traktowana jak staff i pingowana raz. Tickety otwierają się normalnie razem z kartą i kanałem narady.',
+  },
+  {
+    id: '2026-11-22-formularz-rekrutacyjny',
+    data: '2026-11-22',
+    tytul: 'Formularz rekrutacyjny',
+    dodano: [
+      '`/recru panel` — wystawia panel z przyciskiem **📝 Złóż podanie**',
+      'Formularz: nick z Minecrafta, wiek, dlaczego chcesz dołączyć, doświadczenie / co możesz wnieść, ile czasu możesz poświęcić',
+      'Podanie trafia do administracji z przyciskami **Przyjmij** / **Odrzuć**; przy odrzuceniu można podać powód',
+      'Kandydat dostaje decyzję w wiadomości prywatnej; po przyjęciu bot może nadać rolę rekruta',
+    ],
+    opis: 'Jedna osoba może mieć naraz jedno oczekujące podanie, a po odrzuceniu kolejne złoży po 24 h. Nick jest sprawdzany tak jak przy weryfikacji.',
+  },
+  {
+    id: '2026-11-22-ankiety-naprawa',
+    data: '2026-11-22',
+    tytul: 'Naprawa ankiet',
+    naprawiono: [
+      'Anonimowe ankiety z 3 lub więcej odpowiedziami w ogóle się nie wysyłały (Discord odrzucał oznaczenia opcji C–J)',
+      'Zwykłe ankiety z opcją `wiele:true` pozwalały wybrać tylko jedną odpowiedź',
+    ],
+    opis: 'Opcje anonimowych ankiet są teraz oznaczone literami 🇦–🇯. Komenda się nie zmieniła — wystarczy wystawić ankietę jeszcze raz.',
+  },
 ];

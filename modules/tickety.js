@@ -1,5 +1,5 @@
 const {
-  ChannelType, PermissionFlagsBits, MessageFlags,
+  ChannelType, PermissionFlagsBits, MessageFlags, OverwriteType,
   ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
 const db = require('../database/db.js');
@@ -281,7 +281,8 @@ async function onFormularz(interaction) {
   const kategoriaK = kategoriaId && interaction.guild.channels.cache.get(kategoriaId);
   const kategoriaKanal = kategoriaK?.type === ChannelType.GuildCategory ? kategoriaId : null;
   const staffRole = config.role.staff;
-  const helperRole = config.role.helper;
+  // Rola wpisana i w ROLA_STAFF, i w ROLA_HELPER liczy się jako staff (pełne uprawnienia, jeden ping)
+  const helperRole = config.role.helper.filter(id => !staffRole.includes(id));
   const dodatkoweRole = roleDodatkowe(kategoria.value).filter(id => !staffRole.includes(id) && !helperRole.includes(id));
   const nickPole = pola.find(p => kategoria.pola.find(k => k.id === p.id)?.nick);
   const temat = `${kategoria.label}${nickPole?.wartosc ? `: ${nickPole.wartosc}` : ''}`;
@@ -307,12 +308,12 @@ async function onFormularz(interaction) {
   const info = q.wstaw.run(kanal.id, interaction.user.id, kategoria.label, kategoria.value, JSON.stringify(pola), temat, Date.now());
   const ticket = q.poId.get(info.lastInsertRowid);
 
-  const rolaDoPingu = [...staffRole, ...helperRole, ...dodatkoweRole];
+  const rolaDoPingu = [...new Set([...staffRole, ...helperRole, ...dodatkoweRole])];
   const pingStaff = rolaDoPingu.length ? ` ${rolaDoPingu.map(id => `<@&${id}>`).join(' ')}` : '';
   await kanal.send({
     content: `<@${interaction.user.id}>${pingStaff}`,
     allowedMentions: { users: [interaction.user.id], roles: rolaDoPingu },
-  });
+  }).catch((e) => console.error('[tickety] ping', e.message));
   const karta = await kanal.send(kartaDlaTicketu(ticket));
   q.zapiszWiadomosc.run(karta.id, ticket.id);
 
@@ -394,25 +395,71 @@ function nazwaNarady(username, ticketId) {
   return `sprawa-${nick}-${ticketId}-administracja`;
 }
 
+// Discord: maks. 50 kanałów w kategorii, 500 na serwerze
+const LIMIT_KANALOW_KATEGORII = 50;
+
 async function utworzNarade(interaction, ticket) {
-  const staffRole = config.role.staff;
-  const helperRole = config.role.helper;
-  // Jak KATEGORIA_NARADY nie jest kategorią - fallback na null (bez parent)
-  const kategoriaNaradyId = config.kanaly.kategoriaNarady;
-  const kategoriaNaradyK = kategoriaNaradyId && interaction.guild.channels.cache.get(kategoriaNaradyId);
-  const parentNarady = kategoriaNaradyK?.type === ChannelType.GuildCategory ? kategoriaNaradyId : null;
-  const narada = await interaction.guild.channels.create({
+  const guild = interaction.guild;
+  const DOSTEP_NARADY = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory];
+
+  // Narada widoczna dla tych samych osób, które obsługują ticket: staff, helperzy, role dodatkowe kategorii
+  // (np. ranga sądu przy skargach), zamykacze ticketów i technicy. Pomijamy ID ról, których nie ma na serwerze -
+  // jedna błędna rola w .env nie może blokować utworzenia kanału.
+  const roleNarady = [...new Set([
+    ...config.role.staff,
+    ...config.role.helper,
+    ...roleDodatkowe(ticket.kategoria_kod),
+    ...config.role.zamykaczTicketu,
+  ])];
+  const pominieteRole = roleNarady.filter(id => !guild.roles.cache.has(id));
+  const overwrites = [
+    { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: interaction.client.user.id, type: OverwriteType.Member, allow: DOSTEP_BOTA },
+    ...roleNarady.filter(id => guild.roles.cache.has(id)).map(id => ({ id, type: OverwriteType.Role, allow: DOSTEP_NARADY })),
+    ...config.technicy.filter(id => id !== interaction.client.user.id).map(id => ({ id, type: OverwriteType.Member, allow: DOSTEP_NARADY })),
+  ];
+
+  // Kategoria: KATEGORIA_NARADY → KATEGORIA_TICKETY → ta sama kategoria co kanał ticketu → bez kategorii.
+  // Pełna kategoria (50 kanałów) jest pomijana, bo Discord odrzuciłby utworzenie kanału.
+  const kanalTicketu = guild.channels.cache.get(ticket.kanal_id);
+  const kandydaci = [...new Set([config.kanaly.kategoriaNarady, kanalTicketu?.parentId].filter(Boolean))];
+  const parentNarady = kandydaci.find(id => {
+    const k = guild.channels.cache.get(id);
+    return k?.type === ChannelType.GuildCategory && (k.children?.cache?.size ?? 0) < LIMIT_KANALOW_KATEGORII;
+  }) || null;
+
+  const ustawienia = {
     name: nazwaNarady(interaction.user.username, ticket.id),
     type: ChannelType.GuildText,
-    parent: parentNarady,
     topic: `Narada administracji — ticket #${ticket.id} (${ticket.kategoria}). Gracz nie widzi tego kanału.`,
-    permissionOverwrites: [
-      { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-      { id: interaction.client.user.id, allow: DOSTEP_BOTA },
-      ...staffRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
-      ...helperRole.map(id => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory] })),
-    ],
-  });
+    permissionOverwrites: overwrites,
+  };
+
+  const bledy = [];
+  let narada = await guild.channels.create({ ...ustawienia, parent: parentNarady })
+    .catch((e) => { bledy.push(`w kategorii <#${parentNarady}>: ${e.message}`); return null; });
+  // Druga próba bez kategorii - np. brak uprawnień bota w kategorii narad
+  if (!narada && parentNarady) {
+    narada = await guild.channels.create({ ...ustawienia, parent: null })
+      .catch((e) => { bledy.push(`bez kategorii: ${e.message}`); return null; });
+  }
+
+  if (!narada || bledy.length || pominieteRole.length) {
+    const powody = [
+      ...bledy.map(b => `• Błąd Discorda ${b}`),
+      ...(pominieteRole.length ? [`• Pominięto role, których nie ma na serwerze (sprawdź .env): ${pominieteRole.map(id => `\`${id}\``).join(', ')}`] : []),
+      ...(!parentNarady && kandydaci.length ? ['• Kategoria narad nie istnieje, nie jest kategorią albo ma już 50 kanałów — narada powstała bez kategorii'] : []),
+    ];
+    console.error(`[tickety] narada #${ticket.id}:`, powody.join(' | '));
+    await log(interaction.client, {
+      tytul: narada ? `Narada #${ticket.id} — utworzona z problemami` : `Nie utworzono narady dla zgłoszenia #${ticket.id}`,
+      opis: `**Kanał ticketu:** <#${ticket.kanal_id}>\n${powody.join('\n')}` +
+        (narada ? '' : '\n\nNajczęstsze przyczyny: bot nie ma uprawnień *Zarządzanie kanałami* / *Zarządzanie uprawnieniami*, osiągnięto limit 500 kanałów na serwerze.'),
+      kolor: narada ? kolory.ostrzezenie : kolory.blad,
+      kanal: 'logiTickety',
+    }).catch(() => null);
+  }
+  if (!narada) return null;
   q.zapiszNarade.run(narada.id, ticket.id);
   await narada.send({
     ...karty.kartaNarady({
